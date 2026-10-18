@@ -95,6 +95,49 @@ func TestStatusIncludesSessionSnapshot(t *testing.T) {
 	}
 }
 
+func TestRadioStartAndNowReturnContextIDs(t *testing.T) {
+	server := openTestServer(t)
+	rec := serve(server, jsonReq("POST", "/api/contexts", `{"kind":"mood","name":"night"}`))
+	if rec.Code != 200 {
+		t.Fatalf("create context status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID string `json:"context_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || created.ID == "" {
+		t.Fatalf("create context: %v body=%s", err, rec.Body.String())
+	}
+
+	rec = serve(server, jsonReq("POST", "/api/radio/start", `{"context_ids":["`+created.ID+`"]}`))
+	if rec.Code != 200 {
+		t.Fatalf("radio start status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var started struct {
+		SessionID  string   `json:"session_id"`
+		ContextIDs []string `json:"context_ids"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.SessionID == "" || len(started.ContextIDs) != 1 || started.ContextIDs[0] != created.ID {
+		t.Fatalf("start context_ids=%v, want [%s]", started.ContextIDs, created.ID)
+	}
+
+	rec = serve(server, jsonReq("GET", "/api/now?session_id="+started.SessionID, ""))
+	if rec.Code != 200 {
+		t.Fatalf("now status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var now struct {
+		ContextIDs []string `json:"context_ids"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &now); err != nil {
+		t.Fatal(err)
+	}
+	if len(now.ContextIDs) != 1 || now.ContextIDs[0] != created.ID {
+		t.Fatalf("now context_ids=%v, want [%s]", now.ContextIDs, created.ID)
+	}
+}
+
 func TestRadioStartRecordsImpressions(t *testing.T) {
 	server := openTestServer(t)
 	loadIndex(t, server, []db.TrackRow{

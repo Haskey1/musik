@@ -193,32 +193,6 @@ INSERT INTO recommendation_impressions(
 	return tx.Commit()
 }
 
-// InsertRecommendationImpressions is retained for internal compatibility. New
-// playback code should call CreateRecommendationRequest so request provenance
-// and lifecycle closure are never omitted.
-func (s *Store) InsertRecommendationImpressions(items []RecommendationImpression) error {
-	if len(items) == 0 {
-		return nil
-	}
-	requestID := NewID()
-	for i := range items {
-		if items[i].ImpressionID == "" {
-			items[i].ImpressionID = NewID()
-		}
-		items[i].RequestID = requestID
-		if items[i].Source == "" {
-			items[i].Source = "exploit"
-			if items[i].Explore {
-				items[i].Source = "explore"
-			}
-		}
-	}
-	return s.CreateRecommendationRequest(RecommendationRequest{
-		RequestID: requestID, SessionID: items[0].SessionID, Reason: "compat",
-		PolicyVersion: "legacy-go-compat", CandidateCount: len(items),
-	}, items, nil)
-}
-
 type ImpressionRef struct {
 	ImpressionID string
 	RequestID    string

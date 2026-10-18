@@ -126,14 +126,20 @@ func (e *Engine) pickTasteStart(sess *Session) int64 {
 
 func (e *Engine) tasteForQueue(sess *Session) []float32 {
 	dp := db.DayPart(time.Now().Hour())
+	var base []float32
 	if e.TasteState != nil {
 		if sess == nil {
 			return e.TasteState.Effective(dp, nil, taste.DefaultDaypartMinimum)
 		}
-		base := e.TasteState.Effective(dp, &sess.TasteState, taste.DefaultDaypartMinimum)
-		return taste.BlendContexts(base, e.contextBlends(sess.ActiveContextIDs))
+		base = e.TasteState.Effective(dp, &sess.TasteState, taste.DefaultDaypartMinimum)
+		base = taste.BlendContexts(base, e.contextBlends(sess.ActiveContextIDs))
+	} else if e.Taste != nil {
+		base = e.Taste.Get()
 	}
-	return e.Taste.Get()
+	if sess == nil || sess.Anchor.Kind == "" {
+		return base
+	}
+	return blendAnchor(base, e.anchorVector(sess), anchorWeight(sess.Anchor.Proximity))
 }
 
 func (e *Engine) transitionsFrom(currentID int64) map[int64]float64 {
@@ -253,7 +259,7 @@ func (e *Engine) RefreshQueue(sess *Session, currentID int64, reason string) {
 	started := time.Now()
 	defer func() { e.observe("queue_build", time.Since(started)) }()
 	previous := append([]queue.Item(nil), sess.Queue...)
-	e.applyHardBlocks(sess)
+	e.excludeRuleTargets(sess)
 	size := e.Cfg.QueueSize
 	if size < 1 {
 		size = 6

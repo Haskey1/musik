@@ -2,6 +2,7 @@ package playback
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -98,7 +99,7 @@ func TestJumpPrefersTrackIDAndRadioQueue(t *testing.T) {
 		t.Fatalf("playlist jump current/pos=%d/%d", session.Current, session.DailyPos)
 	}
 
-	radio := engine.StartRadio(nil)
+	radio := engine.Start("radio", nil, nil)
 	radio.Lock()
 	radio.Current = 11
 	radio.Queue = []queue.Item{
@@ -159,6 +160,36 @@ func TestBackRestoresRadioTrackAndFixedPosition(t *testing.T) {
 	}
 	if fixed.Current != 11 || fixed.DailyPos != 0 {
 		t.Fatalf("fixed current/pos=%d/%d", fixed.Current, fixed.DailyPos)
+	}
+}
+
+func TestResolvePlayIDsSentinels(t *testing.T) {
+	engine := testEngine(t)
+	_, _, err := engine.ResolvePlayIDs(PlaySpec{TrackIDs: []int64{999}})
+	if !errors.Is(err, ErrNoTracks) {
+		t.Fatalf("empty ids: %v", err)
+	}
+	_, _, err = engine.ResolvePlayIDs(PlaySpec{Artist: "Nobody"})
+	if !errors.Is(err, ErrNothingFound) {
+		t.Fatalf("artist: %v", err)
+	}
+	_, _, err = engine.ResolvePlayIDs(PlaySpec{TrackID: 999})
+	if !errors.Is(err, ErrTrackNotFound) {
+		t.Fatalf("track: %v", err)
+	}
+	_, _, err = engine.ResolvePlayIDs(PlaySpec{})
+	if !errors.Is(err, ErrPlaySpec) {
+		t.Fatalf("spec: %v", err)
+	}
+	sess := engine.StartFixed([]int64{11, 22}, "playlist", "List", "user", 0, 0)
+	sess.Lock()
+	defer sess.Unlock()
+	missing := 5
+	if err := engine.Jump(sess, &missing, 0); !errors.Is(err, ErrTrackNotInPlaylist) {
+		t.Fatalf("jump: %v", err)
+	}
+	if err := engine.Back(sess); !errors.Is(err, ErrNoPrevious) {
+		t.Fatalf("back: %v", err)
 	}
 }
 
@@ -265,7 +296,7 @@ func insertPlaybackTracks(t *testing.T, engine *Engine) {
 func TestRadioStartAssignsImpressionAndIdempotentLifecycle(t *testing.T) {
 	engine := testEngine(t)
 	insertPlaybackTracks(t, engine)
-	session := engine.StartRadio(nil)
+	session := engine.Start("radio", nil, nil)
 	session.Lock()
 	defer session.Unlock()
 	if session.CurrentItem.ImpressionID == "" || session.CurrentItem.Source == "" {
@@ -349,7 +380,7 @@ func TestManualSeedIsNotAlgorithmicSource(t *testing.T) {
 	engine := testEngine(t)
 	insertPlaybackTracks(t, engine)
 	seed := int64(11)
-	session := engine.StartRadio(&seed)
+	session := engine.Start("radio", &seed, nil)
 	session.Lock()
 	defer session.Unlock()
 	if session.CurrentItem.Source != "manual" {
@@ -406,7 +437,7 @@ func TestSharePlaybackDoesNotWriteOwnerData(t *testing.T) {
 func TestDislikeAndEarlySkipStayOffPositiveTaste(t *testing.T) {
 	engine := testEngine(t)
 	insertPlaybackTracks(t, engine)
-	session := engine.StartRadio(nil)
+	session := engine.Start("radio", nil, nil)
 	session.Lock()
 	defer session.Unlock()
 	engine.Taste.UpdateEMA([]float32{1, 0}, 1, 0.5)

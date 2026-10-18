@@ -24,7 +24,7 @@ type Engine struct {
 	Enqueue func(func())
 	Flush   func()
 	Observe func(string, time.Duration)
-	Warm    func(*Session)
+	Warm    func([]int64)
 
 	sessionsMu  sync.RWMutex
 	sessions    map[string]*Session
@@ -79,9 +79,42 @@ func (e *Engine) observe(op string, d time.Duration) {
 }
 
 func (e *Engine) warm(sess *Session) {
-	if e.Warm != nil {
-		e.Warm(sess)
+	if e.Warm == nil {
+		return
 	}
+	ids := warmTrackIDs(sess)
+	if len(ids) == 0 {
+		return
+	}
+	e.Warm(ids)
+}
+
+func warmTrackIDs(sess *Session) []int64 {
+	if sess == nil {
+		return nil
+	}
+	seen := map[int64]bool{}
+	var ids []int64
+	add := func(id int64) {
+		if id == 0 || seen[id] {
+			return
+		}
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	add(sess.Current)
+	for i, item := range sess.Queue {
+		if i >= 6 {
+			break
+		}
+		add(item.TrackID)
+	}
+	if len(sess.DailyIDs) > 0 {
+		for i := sess.DailyPos; i < len(sess.DailyIDs) && len(ids) < 7; i++ {
+			add(sess.DailyIDs[i])
+		}
+	}
+	return ids
 }
 
 func (e *Engine) Maturity() string {

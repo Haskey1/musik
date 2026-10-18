@@ -29,7 +29,7 @@ func coreIndex(t *testing.T) *index.Index {
 			ID: id, Artist: artist, Title: "Track", Album: "Album",
 			Path: "/x.flac", Duration: 180, Year: 2010,
 			BPM: 100 + float64(id), HasBPM: true, LUFS: -12, HasLUFS: true,
-			Embedding: index.Float32Bytes(vec), Dim: 2, Plays: int(id % 4),
+			Embedding: index.Float32Bytes(vec), Dim: 2,
 		})
 	}
 	if err := idx.Load(rows); err != nil {
@@ -117,7 +117,7 @@ func uniqueArtistIndex(t *testing.T) *index.Index {
 			ID: id, Artist: "Artist" + string(rune('A'+id-1)), Title: "Track",
 			Album: "Album", Path: "/x.flac", Duration: 180, Year: 2010,
 			BPM: 100 + float64(id), HasBPM: true, LUFS: -12, HasLUFS: true,
-			Embedding: index.Float32Bytes(vec), Dim: 2, Plays: int(id % 4),
+			Embedding: index.Float32Bytes(vec), Dim: 2,
 		})
 	}
 	if err := idx.Load(rows); err != nil {

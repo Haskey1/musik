@@ -52,6 +52,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			"name":       sess.PlaylistName,
 			"fixed":      playback.IsFixedMode(sess.Mode),
 		}
+		annotateRadio(out, sess)
 		if playback.IsFixedMode(sess.Mode) {
 			out["tracks"] = s.sessionTracks(sess)
 		}

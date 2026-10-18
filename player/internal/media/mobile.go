@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/torwin-job/musik/player/internal/playback"
 )
 
 type flightEntry struct {
@@ -310,11 +308,11 @@ func (s *Service) ensureWarm(id int64) {
 	if _, ok := s.warm.get(id); ok {
 		return
 	}
-	row, ok := s.idx.RowOf(id)
-	if !ok {
+	file, ok := s.files(id)
+	if !ok || file.Path == "" {
 		return
 	}
-	src := s.idx.MetaAt(row).Path
+	src := file.Path
 	path, ctype, err := s.ensureMobileFile(id, src)
 	if err != nil {
 		log.Printf("warm track %d: %v", id, err)
@@ -323,37 +321,8 @@ func (s *Service) ensureWarm(id int64) {
 	s.loadWarmFromFile(id, path, ctype)
 }
 
-func collectWarmIDs(sess *playback.Session) []int64 {
-	if sess == nil {
-		return nil
-	}
-	seen := map[int64]bool{}
-	var ids []int64
-	add := func(id int64) {
-		if id == 0 || seen[id] {
-			return
-		}
-		seen[id] = true
-		ids = append(ids, id)
-	}
-	add(sess.Current)
-	for i, item := range sess.Queue {
-		if i >= 6 {
-			break
-		}
-		add(item.TrackID)
-	}
-	if len(sess.DailyIDs) > 0 {
-		for i := sess.DailyPos; i < len(sess.DailyIDs) && len(ids) < 7; i++ {
-			add(sess.DailyIDs[i])
-		}
-	}
-	return ids
-}
-
-// Warm asynchronously prepares the current and upcoming session tracks.
-func (s *Service) Warm(sess *playback.Session) {
-	ids := collectWarmIDs(sess)
+// Warm asynchronously prepares the given tracks for mobile streaming.
+func (s *Service) Warm(ids []int64) {
 	if len(ids) == 0 {
 		return
 	}

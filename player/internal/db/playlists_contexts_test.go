@@ -1,6 +1,9 @@
 package db
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -37,6 +40,49 @@ func TestTasteContextCRUDAndSeeds(t *testing.T) {
 	list, _ := store.ListTasteContexts(false)
 	if len(list) != 0 {
 		t.Fatalf("archived context still listed: %+v", list)
+	}
+}
+
+func TestCommitTasteContextKeepsVectorWithRow(t *testing.T) {
+	store, _ := openTestStore(t)
+	created, err := store.CommitTasteContext(context.Background(), TasteContext{
+		Kind: "mood", Name: "Вечер", Influence: 1, LearningEnabled: true,
+	}, []byte{1, 2, 3, 4}, 1, true)
+	if err != nil || created == nil || !created.HasVector {
+		t.Fatalf("created=%+v err=%v", created, err)
+	}
+	if err := store.UpsertTasteContextState(TasteContextState{
+		ContextID: created.ID, PositiveVector: []byte{1, 2, 3, 4}, EmbeddingDim: 1, PositiveSamples: 4,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.CommitTasteContext(context.Background(), *created, []byte{5, 6, 7, 8}, 1, false)
+	if err != nil || updated == nil || !updated.HasVector {
+		t.Fatalf("updated=%+v err=%v", updated, err)
+	}
+	state, err := store.LoadTasteContextState(created.ID)
+	if err != nil || state == nil || state.PositiveSamples != 4 || !bytes.Equal(state.PositiveVector, []byte{5, 6, 7, 8}) {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	if _, err := store.CommitTasteContext(context.Background(), TasteContext{ID: "missing", Name: "нет"}, []byte{1}, 1, false); !errors.Is(err, ErrContextNotFound) {
+		t.Fatalf("missing context: %v", err)
+	}
+}
+
+func TestToggleFavoriteFlipsInOneStep(t *testing.T) {
+	store, _ := openTestStore(t)
+	insertTracks(t, store, 1)
+	on, err := store.ToggleFavorite(context.Background(), "track", 1, "", "")
+	if err != nil || !on.Favorited || on.Tracks != 1 {
+		t.Fatalf("on=%+v err=%v", on, err)
+	}
+	off, err := store.ToggleFavorite(context.Background(), "track", 1, "", "")
+	if err != nil || off.Favorited || off.Tracks != 0 {
+		t.Fatalf("off=%+v err=%v", off, err)
+	}
+	artist, err := store.ToggleFavorite(context.Background(), "artist", 0, "Artist", "")
+	if err != nil || !artist.Favorited || artist.Artists != 1 {
+		t.Fatalf("artist=%+v err=%v", artist, err)
 	}
 }
 
@@ -140,6 +186,60 @@ VALUES ('', 21, 0, 1, '2026-01-01T00:00:00Z', 'manual', ?)`, store.ProfileID); e
 	}
 	if err := store.DeleteUserPlaylist(21); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestListUserPlaylistsCountsAndBatchAddRollsBack(t *testing.T) {
+	store, _ := openTestStore(t)
+	insertTracks(t, store, 2)
+	pl, err := store.CreateUserPlaylist(UserPlaylist{Name: "Счёт", Type: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	added, err := store.AddPlaylistItems(context.Background(), pl.ID, []UserPlaylistItem{
+		{TrackID: 1, Source: "radio"},
+		{TrackID: 2, Source: "radio"},
+		{TrackID: 1, Source: "radio"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.Added != 2 || added.Skipped != 1 || added.Last.TrackID != 2 {
+		t.Fatalf("batch=%+v", added)
+	}
+	list, err := store.ListUserPlaylists(nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].TrackCount != 2 {
+		t.Fatalf("list=%+v", list)
+	}
+	if _, err := store.AddPlaylistItems(context.Background(), pl.ID, []UserPlaylistItem{
+		{TrackID: 1, Source: "radio"},
+		{TrackID: 99, Source: "radio"},
+	}); err == nil {
+		t.Fatal("expected foreign-key failure")
+	}
+	got, err := store.GetUserPlaylist(pl.ID)
+	if err != nil || got == nil || got.TrackCount != 2 {
+		t.Fatalf("partial batch stuck: %+v err=%v", got, err)
+	}
+	if _, err := store.AddPlaylistItems(context.Background(), 404, []UserPlaylistItem{{TrackID: 1, Source: "manual"}}); !errors.Is(err, ErrPlaylistNotFound) {
+		t.Fatalf("missing playlist: %v", err)
+	}
+	if _, err := store.CreateUserPlaylistWithItems(context.Background(), UserPlaylist{Name: "Битый", Type: "manual"}, []UserPlaylistItem{
+		{TrackID: 99, Source: "manual"},
+	}); err == nil {
+		t.Fatal("expected create+items rollback")
+	}
+	again, err := store.ListUserPlaylists([]string{"manual"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range again {
+		if item.Name == "Битый" {
+			t.Fatalf("rolled-back playlist is visible: %+v", item)
+		}
 	}
 }
 

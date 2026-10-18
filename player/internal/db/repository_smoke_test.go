@@ -139,7 +139,7 @@ func TestRepositorySmoke(t *testing.T) {
 		pl, err := store.CreateUserPlaylist(UserPlaylist{Name: "Smoke", Type: "manual"})
 		must(err)
 		must(store.UpdateUserPlaylist(UserPlaylist{ID: pl.ID, Name: "Smoke 2", CoverTrackID: 1}))
-		must(store.ReplacePlaylistItems(pl.ID, []UserPlaylistItem{
+		must(store.ReplacePlaylistItems(ctx, pl.ID, []UserPlaylistItem{
 			{TrackID: 1},
 			{UnresolvedArtist: "ARTIST", UnresolvedTitle: "title"},
 			{UnresolvedPath: "/elsewhere/T-3.FLAC"},

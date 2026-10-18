@@ -115,6 +115,39 @@ func TestArtistAndAlbumIndexes(t *testing.T) {
 	}
 }
 
+func TestIDsForTargetUsesRuleKeys(t *testing.T) {
+	idx := New(config.Config{})
+	rows := []db.TrackRow{
+		{ID: 1, Artist: "Gone", Title: "Hidden", Album: "Al", ClusterID: 7, FileMD5: "abc", Embedding: Float32Bytes([]float32{1, 0}), Dim: 2},
+		{ID: 2, Artist: "Kept", Title: "Stay", Album: "Other", FileMD5: "abc", Embedding: Float32Bytes([]float32{0, 1}), Dim: 2},
+	}
+	if err := idx.Load(rows); err != nil {
+		t.Fatal(err)
+	}
+	if got := idx.IDsForTarget("artist", ArtistKey("Gone")); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("artist=%v", got)
+	}
+	if got := idx.IDsForTarget("artist", "kept-segment-only"); got != nil {
+		t.Fatalf("unknown artist=%v", got)
+	}
+	if got := idx.IDsForTarget("album", AlbumKey("Gone", "Al")); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("album=%v", got)
+	}
+	if got := idx.IDsForTarget("track", TrackKey(2)); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("track=%v", got)
+	}
+	if got := idx.IDsForTarget("cluster", ClusterKey(7)); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("cluster=%v", got)
+	}
+	got := idx.IDsForTarget("song", "abc")
+	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("md5=%v", got)
+	}
+	if got := idx.IDsForTarget("song", SongKey("Gone", "Hidden")); len(got) != 1 || got[0] != 1 {
+		t.Fatalf("song key=%v", got)
+	}
+}
+
 func TestCloneIDsIncludesMD5AndSongKeyDuplicates(t *testing.T) {
 	idx := New(config.Config{})
 	rows := []db.TrackRow{

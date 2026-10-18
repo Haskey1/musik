@@ -34,6 +34,7 @@ type Session struct {
 	TasteState        taste.SessionState
 	ActiveContextIDs  []string
 	TransitionProfile string
+	Anchor            RadioAnchor
 }
 
 func (s *Session) Lock()   { s.mu.Lock() }
@@ -88,6 +89,13 @@ func (e *Engine) Get(id string) *Session {
 	return sess
 }
 
+// persistedSessionTaste stores the radio anchor next to the taste snapshot
+// so a restarted session still holds the station. Older rows have no anchor.
+type persistedSessionTaste struct {
+	taste.SessionState
+	Anchor RadioAnchor `json:"radio_anchor,omitempty"`
+}
+
 func hydrate(row db.PlaySessionRow) *Session {
 	sess := &Session{
 		ID:           row.ID,
@@ -110,7 +118,11 @@ func hydrate(row db.PlaySessionRow) *Session {
 		_ = json.Unmarshal([]byte(row.CurrentItemJSON), &sess.CurrentItem)
 	}
 	if row.TasteStateJSON != "" {
-		_ = json.Unmarshal([]byte(row.TasteStateJSON), &sess.TasteState)
+		var stored persistedSessionTaste
+		if json.Unmarshal([]byte(row.TasteStateJSON), &stored) == nil {
+			sess.TasteState = stored.SessionState
+			sess.Anchor = stored.Anchor
+		}
 	}
 	if row.ExcludeJSON != "" {
 		var ids []int64
@@ -157,11 +169,12 @@ func (e *Engine) persistLocked(sess *Session) {
 	dailyIDs := append([]int64(nil), sess.DailyIDs...)
 	contextIDs := append([]string(nil), sess.ActiveContextIDs...)
 	profile := sess.TransitionProfile
+	anchor := sess.Anchor
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	e.enqueue(func() {
 		qj, _ := json.Marshal(queueItems)
 		cij, _ := json.Marshal(currentItem)
-		tsj, _ := json.Marshal(tasteState)
+		tsj, _ := json.Marshal(persistedSessionTaste{SessionState: tasteState, Anchor: anchor})
 		ej, _ := json.Marshal(exclude)
 		rj, _ := json.Marshal(rated)
 		dj, _ := json.Marshal(dailyIDs)

@@ -155,17 +155,20 @@ func (s *Store) LoadTrackStats() (map[int64]TrackStats, error) {
 }
 
 type CatalogTrack struct {
-	ID          int64
-	Path        string
-	Title       string
-	Artist      string
-	Artists     []string
-	AlbumArtist string
-	Album       string
-	Duration    float64
-	Artwork     string
-	Cluster     int
-	Status      string
+	ID           int64
+	Path         string
+	Title        string
+	Artist       string
+	Artists      []string
+	AlbumArtist  string
+	Album        string
+	Duration     float64
+	Artwork      string
+	Cluster      int
+	Status       string
+	Plays        int
+	EarlySkips   int
+	LastPlayedAt string
 }
 
 func (s *Store) ListCatalogTracks() ([]CatalogTrack, error) {
@@ -176,12 +179,14 @@ func (s *Store) ListCatalogTracksLimit(limit int) ([]CatalogTrack, error) {
 	q := `
 SELECT t.id, t.path, COALESCE(t.title,''), COALESCE(t.artist,''), COALESCE(t.artist_segments,''),
        ` + albumArtistSQL + ` AS album_artist, COALESCE(t.album,''), COALESCE(t.duration,0), COALESCE(t.artwork_path,''),
-       COALESCE(f.cluster_id, -1), COALESCE(f.status, 'pending')
+       COALESCE(f.cluster_id, -1), COALESCE(f.status, 'pending'),
+       COALESCE(ts.plays, 0), COALESCE(ts.early_skips, 0), COALESCE(ts.last_played_at, '')
 FROM tracks t
 LEFT JOIN features f ON f.track_id = t.id
+LEFT JOIN track_stats ts ON ts.track_id = t.id AND ts.profile_id = ?
 WHERE t.is_active = 1 AND t.is_duplicate_of IS NULL
 ORDER BY t.id`
-	var args []any
+	args := []any{s.ProfileID}
 	if limit > 0 {
 		q += ` LIMIT ?`
 		args = append(args, limit)
@@ -189,7 +194,7 @@ ORDER BY t.id`
 	return QueryAll(s.DB, func(rows *sql.Rows, tr *CatalogTrack) error {
 		var segments string
 		if err := rows.Scan(&tr.ID, &tr.Path, &tr.Title, &tr.Artist, &segments, &tr.AlbumArtist, &tr.Album,
-			&tr.Duration, &tr.Artwork, &tr.Cluster, &tr.Status); err != nil {
+			&tr.Duration, &tr.Artwork, &tr.Cluster, &tr.Status, &tr.Plays, &tr.EarlySkips, &tr.LastPlayedAt); err != nil {
 			return err
 		}
 		tr.Artists = parseSegments(segments)

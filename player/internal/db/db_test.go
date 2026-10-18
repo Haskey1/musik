@@ -345,11 +345,15 @@ func TestRecommendationImpressionsJoinOutcomes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	requestID := NewID()
 	impressions := []RecommendationImpression{
-		{SessionID: "s1", TrackID: 1, Position: 0, Explore: true, Score: 0.2},
-		{SessionID: "s1", TrackID: 2, Position: 1, Explore: false, Score: 0.8},
+		{ImpressionID: NewID(), RequestID: requestID, SessionID: "s1", TrackID: 1, Position: 0, Explore: true, Score: 0.2, Source: "explore"},
+		{ImpressionID: NewID(), RequestID: requestID, SessionID: "s1", TrackID: 2, Position: 1, Explore: false, Score: 0.8, Source: "exploit"},
 	}
-	if err := store.InsertRecommendationImpressions(impressions); err != nil {
+	if err := store.CreateRecommendationRequest(RecommendationRequest{
+		RequestID: requestID, SessionID: "s1", Reason: "radio_start",
+		PolicyVersion: "test", CandidateCount: len(impressions),
+	}, impressions, nil); err != nil {
 		t.Fatal(err)
 	}
 	duration := 100.0

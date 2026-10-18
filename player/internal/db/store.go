@@ -48,19 +48,12 @@ type TrackRow struct {
 	// EmbeddingStamp is features.computed_at: it changes whenever the
 	// embedding is rewritten, so a reload can keep unchanged vectors.
 	EmbeddingStamp string
-	Shown          int
-	SkipEarly      int
-	Completed      int
 	Year           int
 	BPM            float64
 	LUFS           float64
 	HasBPM         bool
 	HasLUFS        bool
 	KeyName        string
-	Plays          int
-	Finishes       int
-	EarlySkips     int
-	LastPlayedAt   string
 }
 
 // OpenDatabase opens the configured backend and validates that `musik db

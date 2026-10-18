@@ -28,7 +28,7 @@ func TestMultiUserHTTPIsolationAndCSRF(t *testing.T) {
 	defer store.Close()
 	cfg := config.Config{DBPath: path, MultiUser: true, PublicBaseURL: "https://musik.test", QueueSize: 6}
 	server := New(cfg, store, index.New(cfg), taste.New(), nil)
-	server.multi = &multiUserState{profiles: make(map[string]*Server)}
+	server.multi = &multiUserState{profiles: make(map[string]*profileState)}
 	ctx := context.Background()
 	userA, profileA, err := store.CreateUserWithDefaultProfile(ctx, "A")
 	if err != nil {
@@ -245,5 +245,54 @@ func TestSingleUserPasswordReturnsAPITokenToPhones(t *testing.T) {
 	}
 	if rec := call(`{"password":"owner-secret"}`); rec.Code != 200 || !strings.Contains(rec.Body.String(), `"api-token-value"`) {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMultiUserRootSkipsPlaybackStack(t *testing.T) {
+	cfg := config.Config{MultiUser: true, PublicBaseURL: "https://musik.test"}
+	server := New(cfg, &db.Store{}, index.New(cfg), taste.New(), nil)
+	if server.Play != nil || server.Idx != nil || server.Taste != nil {
+		t.Fatal("multi-user root started the installation playback stack")
+	}
+	if server.Media == nil || server.Auth == nil || server.App == nil || server.App.Catalog == nil {
+		t.Fatal("routes server is missing auth, media, or the shared catalog")
+	}
+}
+
+func TestInactiveProfilesAreEvicted(t *testing.T) {
+	prevIdle, prevMax := profileIdleAfter, profileCacheMax
+	profileIdleAfter = time.Minute
+	profileCacheMax = 2
+	t.Cleanup(func() {
+		profileIdleAfter = prevIdle
+		profileCacheMax = prevMax
+	})
+	server := &Server{multi: &multiUserState{profiles: map[string]*profileState{}}}
+	idle := &profileState{}
+	idle.used.Store(time.Now().Add(-time.Hour).UnixNano())
+	busy := &profileState{}
+	busy.used.Store(time.Now().Add(-time.Hour).UnixNano())
+	busy.refs.Store(1)
+	fresh := &profileState{}
+	fresh.used.Store(time.Now().UnixNano())
+	server.multi.profiles["idle"] = idle
+	server.multi.profiles["busy"] = busy
+	server.multi.profiles["fresh"] = fresh
+	server.sweepProfiles()
+	if _, ok := server.multi.profiles["idle"]; ok {
+		t.Fatal("idle profile stayed cached")
+	}
+	if server.multi.profiles["busy"] != busy || server.multi.profiles["fresh"] != fresh {
+		t.Fatal("in-use or fresh profile was evicted")
+	}
+
+	older := &profileState{}
+	older.used.Store(time.Now().Add(-time.Second).UnixNano())
+	newest := &profileState{}
+	newest.used.Store(time.Now().UnixNano())
+	server.multi.profiles = map[string]*profileState{"older": older, "fresh": fresh, "newest": newest}
+	server.sweepProfiles()
+	if _, ok := server.multi.profiles["older"]; ok || len(server.multi.profiles) != 2 {
+		t.Fatalf("cache = %#v", server.multi.profiles)
 	}
 }
