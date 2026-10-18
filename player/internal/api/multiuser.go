@@ -131,7 +131,7 @@ func (s *Server) multiUserMiddleware(next http.Handler) http.Handler {
 		route, routed := matchRoute(r)
 		if openWithoutSession(route, routed, path, p != nil) {
 			if routed && credentialPost(route) {
-				if origin := r.Header.Get("Origin"); origin != "" && origin != strings.TrimRight(s.Cfg.PublicBaseURL, "/") {
+				if origin := r.Header.Get("Origin"); origin != "" && !s.allowedBrowserOrigin(origin) {
 					writeErr(w, 403, "csrf", "invalid origin")
 					return
 				}
@@ -159,7 +159,7 @@ func (s *Server) multiUserMiddleware(next http.Handler) http.Handler {
 		}
 		if !p.DeviceToken && r.Method != "GET" && r.Method != "HEAD" && r.Method != "OPTIONS" {
 			origin := r.Header.Get("Origin")
-			if origin != "" && origin != strings.TrimRight(s.Cfg.PublicBaseURL, "/") {
+			if origin != "" && !s.allowedBrowserOrigin(origin) {
 				writeErr(w, 403, "csrf", "invalid origin")
 				return
 			}
@@ -778,4 +778,24 @@ func (s *Server) handleInvitationRevoke(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+// Additional deployment names are explicitly trusted for authentication.
+// They do not grant CORS access or remove the CSRF check for cookie sessions.
+func (s *Server) allowedBrowserOrigin(origin string) bool {
+	if origin == strings.TrimRight(s.Cfg.PublicBaseURL, "/") {
+		return true
+	}
+	for _, candidate := range s.Cfg.AuthAllowedOrigins {
+		if candidate != origin {
+			continue
+		}
+		u, err := url.Parse(candidate)
+		if err == nil && u.Scheme == "https" && u.Hostname() != "" &&
+			u.User == nil && u.Path == "" && u.RawPath == "" &&
+			!strings.ContainsAny(candidate, "?#*") {
+			return true
+		}
+	}
+	return false
 }
