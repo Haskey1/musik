@@ -6,6 +6,22 @@
 
 ## [Не выпущено]
 
+### Радио от якоря и веб-интерфейс
+
+#### Добавлено
+- Радио можно начать от трека, артиста, альбома или набора «забытое». Якорь остаётся в смеси вкуса, пока станцию не отпустят: сначала «радио от: …», шаги «ближе» и «шире»; обычный старт без семени по-прежнему радио по вкусу. Из плейлиста станция стартует от первого трека — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+- Полка миксов читается из `player/internal/playback/mixes.json`; воркер отдаёт тот же набор — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+- В профиле — неделя прослушиваний и «в этот день» — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+- «Профиль → Вид → Цвет от обложки»: акцент и фон могут следовать за обложкой текущего трека. Настройка в этом браузере, по умолчанию выключена — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+
+#### Изменено
+- У вкладки нет иконки приложения. «Играть», «пауза», «назад» и «далее» снова значки; остальные кнопки — текст. В очереди нет меток «да» и «нет» — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+- Страница «Профиль» — одна колонка: поля одной высоты, переключатели в линию с текстом. Смена профиля в шапке — отдельное поле с подписью, не системный список — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+- Описание API и OpenAPI приведены к текущим маршрутам: радио с якорем, полка, профили — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+
+#### Удалено
+- Страница `musik_omarchy.html` — [`8ea54908847836d25ff852593d99d79458c73821`](https://github.com/torwin-job/musik/commit/8ea54908847836d25ff852593d99d79458c73821) ([@torwin-job](https://github.com/torwin-job))
+
 ### Библиотека, мобильный интерфейс и воспроизведение
 
 Автор — [@DiMAKES](https://github.com/DiMAKES); перенесено из закрытых #15–#21.
