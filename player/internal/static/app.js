@@ -1150,6 +1150,8 @@ function renderNow(track, { autoplay = true, startAt = 0, listened = 0, announce
   if (audio.dataset.trackId !== String(track.id)) {
     const gen = bumpPlayback();
     audio.dataset.trackId = String(track.id);
+    delete audio.dataset.compatibleRetry;
+    audio.dataset.retryAutoplay = String(autoplay);
     audio.dataset.gen = String(gen);
     audio.src = url;
     const at = Math.max(0, Number(startAt) || 0);
@@ -3548,6 +3550,7 @@ function wireAudio() {
     updatePositionState();
   });
   audio.addEventListener("play", () => {
+    audio.dataset.retryAutoplay = "true";
     setPlayIcon(true);
     updatePositionState();
     // Playing here takes the shared state over from any other device.
@@ -3555,6 +3558,7 @@ function wireAudio() {
     pushPlaybackState({ playing: true, claim: true });
   });
   audio.addEventListener("pause", () => {
+    if (!audio.error) audio.dataset.retryAutoplay = "false";
     if (seeking || audio.seeking) return;
     setPlayIcon(false);
     updatePositionState();
@@ -3575,6 +3579,24 @@ function wireAudio() {
     const gen = Number(audio.dataset.gen || 0);
     if (!id || gen !== playbackGen || id !== current?.id || !sessionId) return;
     if (audio.error?.code === MediaError.MEDIA_ERR_ABORTED) return;
+    // Some browsers cannot decode ALAC or other valid library formats.
+    // Retry this impression once through the compatible stream before skipping.
+    if ((audio.error?.code === MediaError.MEDIA_ERR_DECODE || audio.error?.code === MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED)
+        && audio.dataset.compatibleRetry !== "true") {
+      audio.dataset.compatibleRetry = "true";
+      const position = Number.isFinite(audio.currentTime) ? audio.currentTime : 0;
+      const resume = audio.dataset.retryAutoplay === "true";
+      const url = new URL(`/api/stream/${id}`, location.origin);
+      url.searchParams.set("q", "mp3");
+      audio.src = url.href;
+      if (position > 0) audio.addEventListener("loadedmetadata", () => {
+        if (Number(audio.dataset.gen) !== gen || current?.id !== id) return;
+        audio.currentTime = position;
+        lastPos = position;
+      }, { once: true });
+      if (resume) audio.play().catch(() => setPlayIcon(false));
+      return;
+    }
     unplayableRun += 1;
     if (unplayableRun > 3) {
       toast("Не получается воспроизвести треки подряд");
