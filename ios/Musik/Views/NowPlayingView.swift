@@ -9,6 +9,7 @@ struct NowPlayingView: View {
 
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var scrubbing = false
@@ -67,9 +68,15 @@ struct NowPlayingView: View {
                 Text(player.listName ?? (player.fixed ? "Плейлист" : "Радио"))
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                Text(Labels.maturity(player.maturity))
-                    .font(.caption2)
-                    .foregroundStyle(Theme.teal)
+                if player.offlineMode {
+                    Label("офлайн · с телефона", systemImage: "wifi.slash")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.accentBright)
+                } else {
+                    Text(Labels.maturity(player.maturity))
+                        .font(.caption2)
+                        .foregroundStyle(Theme.teal)
+                }
             }
             Spacer()
             Color.clear.frame(width: 24, height: 24)
@@ -169,6 +176,18 @@ struct NowPlayingView: View {
                 .buttonStyle(ChipButtonStyle(active: player.disliked))
                 .disabled(player.disliked)
                 .accessibilityLabel("Дизлайк")
+
+                Button {
+                    if offline.isSaved(track.id) { offline.remove(track.id) } else { offline.save(track) }
+                } label: {
+                    if offline.downloading.contains(track.id) {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: offline.isSaved(track.id) ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    }
+                }
+                .buttonStyle(ChipButtonStyle(active: offline.isSaved(track.id)))
+                .accessibilityLabel("Сохранить на телефон")
 
                 Button { Task { await app.addLater(track.id) } } label: {
                     Label("Потом", systemImage: "clock")

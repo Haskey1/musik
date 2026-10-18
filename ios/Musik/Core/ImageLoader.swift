@@ -71,6 +71,10 @@ struct ArtworkView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task(id: trackId) {
             image = nil
+            if let trackId, let local = OfflineStore.shared.artwork(trackId) {
+                image = local
+                return
+            }
             guard let trackId, let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
             if let hit = ImageLoader.shared.cached(url) {
                 image = hit

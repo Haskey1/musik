@@ -9,6 +9,7 @@ struct MusikApp: App {
             RootView()
                 .environmentObject(app)
                 .environmentObject(app.player)
+                .environmentObject(app.offline)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
         }
@@ -49,6 +50,8 @@ struct MainView: View {
                 .tabItem { Label("Главная", systemImage: "house.fill") }
             tab { LibraryView() }
                 .tabItem { Label("Библиотека", systemImage: "music.note.list") }
+            tab { DownloadsView() }
+                .tabItem { Label("Сохранённые", systemImage: "arrow.down.circle.fill") }
             tab { ProfileView() }
                 .tabItem { Label("Профиль", systemImage: "person.crop.circle") }
         }
@@ -56,6 +59,7 @@ struct MainView: View {
             NowPlayingView()
                 .environmentObject(app)
                 .environmentObject(player)
+                .environmentObject(app.offline)
                 .presentationDragIndicator(.visible)
         }
     }

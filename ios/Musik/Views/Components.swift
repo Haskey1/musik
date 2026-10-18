@@ -144,6 +144,7 @@ struct AlbumCard: View {
 struct TrackRow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
     let track: Track
     var index: Int?
     var showArtwork = true
@@ -169,6 +170,7 @@ struct TrackRow: View {
                     Text(track.subtitle).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 8)
+                SaveButton(track: track)
                 if app.favoriteTracks.contains(track.id) {
                     Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
                 }
@@ -188,9 +190,19 @@ struct TrackRow: View {
 struct TrackMenu: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
     let track: Track
 
     var body: some View {
+        if offline.isSaved(track.id) {
+            Button(role: .destructive) {
+                offline.remove(track.id)
+            } label: { Label("Удалить с телефона", systemImage: "trash") }
+        } else {
+            Button {
+                offline.save(track)
+            } label: { Label("Сохранить на телефон", systemImage: "arrow.down.circle") }
+        }
         Button {
             player.play(["track_id": track.id, "name": track.displayTitle])
         } label: { Label("Играть трек", systemImage: "play.fill") }
@@ -201,7 +213,7 @@ struct TrackMenu: View {
             Task { await app.addLater(track.id) }
         } label: { Label("Потом", systemImage: "clock") }
         Button {
-            Task { await app.toggleFavoriteTrack(track.id) }
+            Task { await app.toggleFavoriteTrack(track.id, track: track) }
         } label: {
             app.favoriteTracks.contains(track.id)
                 ? Label("Убрать из любимых", systemImage: "heart.slash")
@@ -217,6 +229,40 @@ struct TrackMenu: View {
                 player.play(["artist": track.artist ?? "", "album": album])
             } label: { Label("Весь альбом", systemImage: "square.stack") }
         }
+    }
+}
+
+/// Download state of a track: tap to save, a spinner while downloading, a filled
+/// icon once it is on the phone (tap again to remove).
+struct SaveButton: View {
+    @EnvironmentObject var offline: OfflineStore
+    let track: Track
+    var font: Font = .body
+
+    var body: some View {
+        Button {
+            if offline.isSaved(track.id) {
+                offline.remove(track.id)
+                AppToast.show("Удалено с телефона")
+            } else {
+                offline.save(track)
+            }
+        } label: {
+            Group {
+                if offline.downloading.contains(track.id) {
+                    ProgressView().controlSize(.small)
+                } else if offline.isSaved(track.id) {
+                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(Theme.accent)
+                } else {
+                    Image(systemName: "arrow.down.circle").foregroundStyle(Theme.muted)
+                }
+            }
+            .font(font)
+            .frame(width: 30, height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(offline.isSaved(track.id) ? "Удалить с телефона" : "Сохранить")
     }
 }
 

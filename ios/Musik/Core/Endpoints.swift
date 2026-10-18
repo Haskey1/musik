@@ -13,6 +13,19 @@ extension APIClient {
         _ = try await send("POST", "/api/auth/login", body: ["password": password], redirectOn401: false)
     }
 
+    /// Multi-user sign-in: username + password give a personal device token
+    /// (the same kind the web UI issues under account → device tokens).
+    func issueToken(username: String, password: String, deviceName: String) async throws -> String {
+        struct Issued: Decodable { var token: String? }
+        let data = try await send("POST", "/api/auth/token", body: [
+            "username": username, "password": password, "device_name": deviceName,
+        ], redirectOn401: false)
+        guard let token = try decode(Issued.self, from: data).token, !token.isEmpty else {
+            throw APIError(status: 0, code: "no_token", message: "Сервер не выдал токен")
+        }
+        return token
+    }
+
     func logout() async {
         _ = try? await send("POST", "/api/auth/logout", redirectOn401: false)
     }

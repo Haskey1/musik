@@ -47,7 +47,12 @@ final class Settings: @unchecked Sendable {
     static func normalize(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while s.hasSuffix("/") { s.removeLast() }
-        if !s.isEmpty && !s.contains("://") { s = "http://" + s }
+        if !s.isEmpty && !s.contains("://") {
+            // A domain is served over HTTPS; a LAN IP or an explicit port (…:8787) is plain HTTP.
+            let host = s.split(separator: "/").first.map(String.init) ?? s
+            let isIP = host.split(separator: ":").first.map { $0.allSatisfy { $0.isNumber || $0 == "." } } ?? false
+            s = (isIP || host.contains(":") ? "http://" : "https://") + s
+        }
         return s
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 /// App-wide state: login gate, toasts and favorite sets shared by every screen.
 @MainActor
@@ -13,10 +14,13 @@ final class AppState: ObservableObject {
     @Published var favoriteAlbums: Set<String> = []
     /// Bumped when shelves should reload (favorites or mixes changed).
     @Published var homeRevision = 0
+    /// Started without a connection to the server: only saved tracks are available.
+    @Published var offlineLaunch = false
 
     let settings: Settings
     let api: APIClient
     let player: PlayerController
+    let offline: OfflineStore
 
     private var toastTask: Task<Void, Never>?
 
@@ -25,8 +29,12 @@ final class AppState: ObservableObject {
         let api = APIClient(settings: settings)
         self.settings = settings
         self.api = api
-        self.player = PlayerController(api: api, settings: settings)
+        let offline = OfflineStore.shared
+        self.offline = offline
+        self.player = PlayerController(api: api, settings: settings, offline: offline)
         ImageLoader.shared.api = api
+        offline.api = api
+        AppToast.app = self
         player.app = self
         api.onUnauthorized = { [weak self] in self?.handleUnauthorized() }
     }
@@ -47,6 +55,12 @@ final class AppState: ObservableObject {
             } else {
                 phase = .login
             }
+        } catch let e as APIError where e.status == 0 && settings.token.nonEmpty != nil {
+            // No connection, but we were signed in before: open the app with what is
+            // saved on the phone instead of the login screen.
+            offlineLaunch = true
+            phase = .ready
+            show("Нет связи с сервером — играют сохранённые треки")
         } catch {
             // Server unreachable: still show the login screen with the saved URL.
             phase = .login
@@ -54,28 +68,42 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Called when the connection comes back after an offline launch.
+    func reconnect() async {
+        guard offlineLaunch, let me = try? await api.authMe(), me.ok || me.authEnabled == false else { return }
+        offlineLaunch = false
+        homeRevision += 1
+        await refreshFavorites()
+    }
+
     enum LoginMode: String, CaseIterable, Identifiable {
-        case token = "API token"
-        case password = "Пароль"
+        case account = "Логин и пароль"
+        case token = "Токен"
         var id: String { rawValue }
     }
 
-    func login(baseURL: String, mode: LoginMode, secret: String) async throws {
+    func login(baseURL: String, mode: LoginMode, username: String, secret: String) async throws {
         settings.baseURL = baseURL
         let secret = secret.trimmingCharacters(in: .whitespacesAndNewlines)
+        let username = username.trimmingCharacters(in: .whitespacesAndNewlines)
         switch mode {
         case .token:
             settings.token = secret
-        case .password:
+        case .account where username.isEmpty:
+            // Single-owner server: one password, cookie session.
             settings.token = nil
             try await api.login(password: secret)
+        case .account:
+            settings.token = nil
+            let device = "musik iOS · \(UIDevice.current.name)"
+            settings.token = try await api.issueToken(username: username, password: secret, deviceName: device)
         }
         _ = try await api.health()
         let me = try await api.authMe()
         guard me.ok || me.authEnabled == false else {
             settings.token = nil
             throw APIError(status: 401, code: "auth_required",
-                           message: mode == .token ? "Сервер не принял токен" : "Не удалось войти")
+                           message: mode == .token ? "Сервер не принял токен" : "Неверное имя или пароль")
         }
         phase = .ready
         await refreshFavorites()
@@ -90,6 +118,7 @@ final class AppState: ObservableObject {
         favoriteTracks = []
         favoriteArtists = []
         favoriteAlbums = []
+        offlineLaunch = false
         phase = .login
     }
 
@@ -104,6 +133,7 @@ final class AppState: ObservableObject {
 
     func refreshFavorites() async {
         guard let fav = try? await api.favorites() else { return }
+        offline.syncFavorites((fav.tracks ?? []).map(\.asTrack))
         favoriteTracks = Set((fav.tracks ?? []).map(\.trackId))
         favoriteArtists = Set((fav.artists ?? []).map(\.artist))
         favoriteAlbums = Set((fav.albums ?? []).map(\.id))
@@ -113,10 +143,11 @@ final class AppState: ObservableObject {
 
     /// Toggles a track heart; returns the new state.
     @discardableResult
-    func toggleFavoriteTrack(_ id: Int) async -> Bool? {
+    func toggleFavoriteTrack(_ id: Int, track: Track? = nil) async -> Bool? {
         do {
             let r = try await api.toggleFavorite(["type": "track", "track_id": id])
             if r.favorited { favoriteTracks.insert(id) } else { favoriteTracks.remove(id) }
+            offline.favoriteChanged(track ?? Track(id: id), favorited: r.favorited)
             show(r.favorited ? "Любимая песня" : "Песня убрана из любимых")
             homeRevision += 1
             return r.favorited

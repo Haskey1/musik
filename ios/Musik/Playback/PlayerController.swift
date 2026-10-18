@@ -1,5 +1,6 @@
 import AVFoundation
 import MediaPlayer
+import Network
 import UIKit
 
 /// Playback state machine mirroring the web client (app.js):
@@ -21,11 +22,16 @@ final class PlayerController: ObservableObject {
     @Published private(set) var disliked = false
     /// A start / skip request is in flight.
     @Published private(set) var busy = false
+    /// Playing files from the phone (saved or prefetched) without the server.
+    @Published private(set) var offlineMode = false
+    /// The device has a network path (NWPathMonitor); says nothing about the server itself.
+    @Published private(set) var networkUp = true
 
     weak var app: AppState?
 
     private let api: APIClient
     private let settings: Settings
+    private let offline: OfflineStore
     private let player = AVPlayer()
 
     private(set) var sessionId: String?
@@ -49,13 +55,26 @@ final class PlayerController: ObservableObject {
     private var nowPlayingArtwork: MPMediaItemArtwork?
     private var interruptionObserver: NSObjectProtocol?
 
-    init(api: APIClient, settings: Settings) {
+    // Offline playback: a local list played without server events.
+    private var offlineList: [Track] = []
+    private var offlineIndex = 0
+    /// Entered automatically because the server went away (vs. «Сохранённые» chosen by hand);
+    /// only then does the player switch back to online radio when the network returns.
+    private var offlineFallback = false
+    private var onlineRetryAfter = Date.distantPast
+    private var stallTask: Task<Void, Never>?
+    private var prefetchTask: Task<Void, Never>?
+    private let pathMonitor = NWPathMonitor()
+
+    init(api: APIClient, settings: Settings, offline: OfflineStore) {
         self.api = api
         self.settings = settings
+        self.offline = offline
         player.automaticallyWaitsToMinimizeStalling = true
         configureAudioSession()
         configureRemoteCommands()
         observePlayer()
+        observeNetwork()
     }
 
     var hasSession: Bool { sessionId != nil }
@@ -96,6 +115,13 @@ final class PlayerController: ObservableObject {
 
     /// Jump inside the current list / radio queue.
     func jump(trackId: Int, index: Int) {
+        if offlineMode {
+            guard trackId != current?.id,
+                  let i = offlineList.firstIndex(where: { $0.id == trackId }) else { return }
+            offlineIndex = i
+            load(offlineList[i], autoplay: true)
+            return
+        }
         guard let sid = sessionId, trackId != current?.id else { return }
         start {
             try await self.api.post("/api/session/jump", ["session_id": sid, "index": index, "track_id": trackId])
@@ -112,7 +138,14 @@ final class PlayerController: ObservableObject {
                 guard req == self.requestSeq else { return }
                 self.apply(payload, autoplay: true)
             } catch {
-                self.app?.show(error)
+                guard req == self.requestSeq else { return }
+                // Radio asked for with no server in reach: play what is saved on the phone.
+                if Self.isNetwork(error), !self.offline.saved.isEmpty {
+                    self.offlineMode = false
+                    self.enterOfflineFallback()
+                } else {
+                    self.app?.show(error)
+                }
             }
         }
     }
@@ -130,6 +163,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func apply(_ p: PlayPayload, autoplay: Bool) {
+        leaveOffline()
         if let sid = p.sessionId { setSession(sid) }
         if let m = p.maturity { maturity = m }
         let tracks = p.tracks ?? []
@@ -196,6 +230,10 @@ final class PlayerController: ObservableObject {
     }
 
     func skip() {
+        if offlineMode {
+            offlineStep(+1)
+            return
+        }
         guard let track = current, sessionId != nil else { return }
         generation += 1
         let req = nextRequest()
@@ -207,8 +245,13 @@ final class PlayerController: ObservableObject {
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {
-                self.app?.show(error)
-                if req == self.requestSeq { self.player.play() }
+                guard req == self.requestSeq else { return }
+                if Self.isNetwork(error) {
+                    self.enterOfflineFallback()
+                } else {
+                    self.app?.show(error)
+                    self.player.play()
+                }
             }
         }
     }
@@ -224,6 +267,15 @@ final class PlayerController: ObservableObject {
     }
 
     func back() {
+        if offlineMode {
+            if position > 3 || offlineIndex == 0 {
+                seek(to: 0)
+                if !isPlaying { resume() }
+            } else {
+                offlineStep(-1)
+            }
+            return
+        }
         guard current != nil, let sid = sessionId else { return }
         if position > 3 {
             seek(to: 0)
@@ -236,6 +288,10 @@ final class PlayerController: ObservableObject {
 
     private func trackFinished(gen: Int) {
         guard gen == generation, let track = current else { return }
+        if offlineMode {
+            offlineStep(+1)
+            return
+        }
         generation += 1
         requestSeq += 1
         let req = requestSeq
@@ -246,7 +302,9 @@ final class PlayerController: ObservableObject {
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {
-                self.app?.show(error)
+                guard req == self.requestSeq else { return }
+                // No server to ask for the next track: carry on from the phone.
+                if Self.isNetwork(error) { self.enterOfflineFallback() } else { self.app?.show(error) }
             }
         }
     }
@@ -271,6 +329,7 @@ final class PlayerController: ObservableObject {
         } else if let q = res.queue {
             queue = q
         }
+        schedulePrefetch()
     }
 
     // MARK: - Rating
@@ -284,7 +343,7 @@ final class PlayerController: ObservableObject {
     func like() {
         guard let track = current, let app else { return }
         Task {
-            if await app.toggleFavoriteTrack(track.id) == true {
+            if await app.toggleFavoriteTrack(track.id, track: track) == true {
                 if let res = try? await self.postEvent("like", track: track) { self.applyLists(res) }
             }
         }
@@ -318,15 +377,22 @@ final class PlayerController: ObservableObject {
         lastPos = 0
         lastProgressAt = Date()
 
-        guard let url = api.streamURL(for: track) else { return }
-        var options: [String: Any] = [:]
-        let headers = api.authHeaders()
-        if !headers.isEmpty { options["AVURLAssetHTTPHeaderFieldsKey"] = headers }
-        let cookies = api.cookies(for: url)
-        if !cookies.isEmpty { options[AVURLAssetHTTPCookiesKey] = cookies }
-        let item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
+        let item: AVPlayerItem
+        if let local = offline.playableURL(track.id) {
+            // Saved or prefetched: plays even with no connection, starts instantly.
+            item = AVPlayerItem(url: local)
+        } else {
+            guard let url = api.streamURL(for: track) else { return }
+            var options: [String: Any] = [:]
+            let headers = api.authHeaders()
+            if !headers.isEmpty { options["AVURLAssetHTTPHeaderFieldsKey"] = headers }
+            let cookies = api.cookies(for: url)
+            if !cookies.isEmpty { options[AVURLAssetHTTPCookiesKey] = cookies }
+            item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
+        }
         observe(item, gen: gen)
         player.replaceCurrentItem(with: item)
+        schedulePrefetch()
 
         nowPlayingArtwork = nil
         updateNowPlaying()
@@ -341,6 +407,7 @@ final class PlayerController: ObservableObject {
 
     private func sendStart(_ track: Track) {
         startSent = true
+        guard !offlineMode else { return }
         Task { _ = try? await self.postEvent("track_start", track: track) }
     }
 
@@ -376,10 +443,16 @@ final class PlayerController: ObservableObject {
 
     private func playbackFailed(gen: Int, error: Error?) {
         guard gen == generation, let track = current else { return }
+        if !offlineMode, !networkUp || Self.isNetworkError(error) {
+            enterOfflineFallback()
+            return
+        }
         failStreak += 1
         app?.show("Не удалось воспроизвести «\(track.displayTitle)»")
         // Unsupported codec or a missing file: move on, but don't spin through a broken library.
-        if failStreak <= 3 {
+        if offlineMode {
+            offlineStep(+1)
+        } else if failStreak <= 3 {
             skip()
         } else {
             player.pause()
@@ -397,6 +470,7 @@ final class PlayerController: ObservableObject {
                 guard let self else { return }
                 let playing = status != .paused
                 self.isBuffering = status == .waitingToPlayAtSpecifiedRate
+                if self.isBuffering { self.watchStall() } else { self.stallTask?.cancel() }
                 if playing != self.isPlaying {
                     self.isPlaying = playing
                     self.updateNowPlaying()
@@ -444,6 +518,7 @@ final class PlayerController: ObservableObject {
         position = 0
         duration = 0
         busy = false
+        leaveOffline()
         if clearSession {
             sessionId = nil
             settings.sessionId = nil
@@ -456,7 +531,7 @@ final class PlayerController: ObservableObject {
     @discardableResult
     private func postEvent(_ type: String, track: Track? = nil, reason: String? = nil,
                            retry: Bool = false) async throws -> EventResult? {
-        guard let sid = sessionId, let t = track ?? current else { return nil }
+        guard !offlineMode, let sid = sessionId, let t = track ?? current else { return nil }
         let isCurrent = t.id == current?.id
         var body: [String: Any] = [
             "type": type,
@@ -482,6 +557,174 @@ final class PlayerController: ObservableObject {
             data = try await api.send("POST", "/api/events", body: body)
         }
         return try api.decode(EventResult.self, from: data)
+    }
+
+    // MARK: - Offline
+
+    /// Plays saved tracks from the phone («Сохранённые» tab); works with or without a connection.
+    func playOffline(_ tracks: [Track], startAt index: Int = 0, shuffle: Bool = false) {
+        var list = tracks
+        var start = index
+        if shuffle {
+            list.shuffle()
+            start = 0
+        }
+        guard list.indices.contains(start) else { return }
+        startOffline(list, at: start, fallback: false, name: "Сохранённые")
+    }
+
+    /// The server can't be reached mid-listening: continue with what is on the phone —
+    /// first the upcoming tracks already prefetched, then saved tracks in random order.
+    private func enterOfflineFallback() {
+        guard !offlineMode else { return }
+        var list = upcomingTracks(3).filter { offline.playableURL($0.id) != nil }
+        var seen = Set(list.map(\.id))
+        if let id = current?.id { seen.insert(id) }
+        list += offline.savedTracks.map(\.track).filter { !seen.contains($0.id) }.shuffled()
+        guard !list.isEmpty else {
+            player.pause()
+            app?.show("Нет сети, а сохранённых треков пока нет")
+            return
+        }
+        onlineRetryAfter = .distantPast
+        startOffline(list, at: 0, fallback: true, name: "Без сети · сохранённое")
+        app?.show("Нет сети — играю сохранённое")
+    }
+
+    private func startOffline(_ list: [Track], at index: Int, fallback: Bool, name: String) {
+        stallTask?.cancel()
+        requestSeq += 1
+        busy = false
+        offlineMode = true
+        offlineFallback = fallback
+        offlineList = list
+        offlineIndex = index
+        fixed = true
+        playlist = list
+        queue = []
+        listName = name
+        load(list[index], autoplay: true)
+    }
+
+    private func leaveOffline() {
+        offlineMode = false
+        offlineFallback = false
+        offlineList = []
+        offlineIndex = 0
+    }
+
+    private func offlineStep(_ delta: Int) {
+        // Back online after an automatic switch: return to the radio at the track boundary.
+        if delta > 0, offlineFallback, networkUp, Date() >= onlineRetryAfter {
+            returnOnline()
+            return
+        }
+        var i = max(0, offlineIndex + delta)
+        if i >= offlineList.count {
+            guard offlineFallback, !offlineList.isEmpty else {
+                player.pause()
+                app?.show("Конец списка")
+                return
+            }
+            offlineList.shuffle()  // keep the music going until the network is back
+            playlist = offlineList
+            i = 0
+        }
+        offlineIndex = i
+        load(offlineList[i], autoplay: true)
+    }
+
+    private func returnOnline() {
+        let req = nextRequest()
+        Task {
+            defer { self.finish(req) }
+            do {
+                let payload: PlayPayload = try await self.api.post("/api/radio/start", [:])
+                guard req == self.requestSeq else { return }
+                self.app?.show("Сеть вернулась — снова онлайн-радио")
+                self.apply(payload, autoplay: true)
+            } catch {
+                guard req == self.requestSeq else { return }
+                // The phone has a network but the server is still out of reach: try again in a minute.
+                self.onlineRetryAfter = Date().addingTimeInterval(60)
+                self.offlineStep(+1)
+            }
+        }
+    }
+
+    /// The next tracks of the current radio or list, as far as the client knows them.
+    private func upcomingTracks(_ n: Int) -> [Track] {
+        let next: [Track]
+        if fixed {
+            if let id = current?.id, let i = playlist.firstIndex(where: { $0.id == id }) {
+                next = Array(playlist.dropFirst(i + 1).prefix(n))
+            } else {
+                next = Array(playlist.prefix(n))
+            }
+        } else {
+            next = queue.prefix(n).map(\.asTrack)
+        }
+        return next.filter { $0.id != current?.id }
+    }
+
+    /// Downloads the next two tracks a few seconds after a track starts, so a dropped
+    /// connection at the track boundary doesn't stop the music.
+    private func schedulePrefetch() {
+        prefetchTask?.cancel()
+        guard !offlineMode, networkUp else { return }
+        prefetchTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, !self.offlineMode else { return }
+            self.offline.prefetch(self.upcomingTracks(2))
+        }
+    }
+
+    /// A streamed track stopped to buffer: with no network give up right away, on a bad
+    /// one after 15 s, and continue from the phone instead of a long silence.
+    private func watchStall() {
+        stallTask?.cancel()
+        guard !offlineMode, let id = current?.id, offline.playableURL(id) == nil else { return }
+        stallTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, self.isBuffering, !self.offlineMode else { return }
+            if !self.networkUp {
+                self.enterOfflineFallback()
+                return
+            }
+            try? await Task.sleep(nanoseconds: 11_000_000_000)
+            guard !Task.isCancelled, self.isBuffering, !self.offlineMode else { return }
+            self.enterOfflineFallback()
+        }
+    }
+
+    private func observeNetwork() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            Task { @MainActor in self?.networkChanged(up) }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "musik.network"))
+    }
+
+    private func networkChanged(_ up: Bool) {
+        guard up != networkUp else { return }
+        networkUp = up
+        if up {
+            onlineRetryAfter = .distantPast
+            schedulePrefetch()
+            Task { await self.app?.reconnect() }
+        } else if isBuffering {
+            watchStall()
+        }
+    }
+
+    nonisolated private static func isNetwork(_ error: Error) -> Bool {
+        (error as? APIError)?.status == 0 && (error as? APIError)?.code == "network"
+    }
+
+    nonisolated private static func isNetworkError(_ error: Error?) -> Bool {
+        guard let error else { return false }
+        if error is URLError { return true }
+        return (error as NSError).domain == NSURLErrorDomain
     }
 
     // MARK: - System integration
@@ -544,6 +787,11 @@ final class PlayerController: ObservableObject {
 
     private func loadNowPlayingArtwork(for track: Track) {
         artworkTask?.cancel()
+        if let img = offline.artwork(track.id) {
+            nowPlayingArtwork = Self.makeArtwork(img)
+            updateNowPlaying()
+            return
+        }
         guard let url = api.artworkURL(trackId: track.id, width: 640) else { return }
         artworkTask = Task {
             guard let img = await ImageLoader.shared.image(url),

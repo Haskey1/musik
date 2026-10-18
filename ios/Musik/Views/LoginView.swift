@@ -3,7 +3,8 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject var app: AppState
     @State private var baseURL = ""
-    @State private var mode: AppState.LoginMode = .token
+    @State private var mode: AppState.LoginMode = .account
+    @State private var username = ""
     @State private var secret = ""
     @State private var busy = false
     @State private var error: String?
@@ -21,7 +22,7 @@ struct LoginView: View {
                 .padding(.top, 48)
 
                 field("Адрес сервера") {
-                    TextField("http://192.168.1.10:8787", text: $baseURL)
+                    TextField("https://music.example.com", text: $baseURL)
                         .keyboardType(.URL)
                         .textContentType(.URL)
                         .textInputAutocapitalization(.never)
@@ -33,10 +34,23 @@ struct LoginView: View {
                 }
                 .pickerStyle(.segmented)
 
-                field(mode == .token ? "MUSIK_API_TOKEN" : "MUSIK_PASSWORD") {
-                    SecureField(mode == .token ? "токен из .env сервера" : "пароль", text: $secret)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                if mode == .account {
+                    field("Логин") {
+                        TextField("как на сайте", text: $username)
+                            .textContentType(.username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    field("Пароль") {
+                        SecureField("пароль от musik", text: $secret)
+                            .textContentType(.password)
+                    }
+                } else {
+                    field("Токен устройства") {
+                        SecureField("из аккаунта на сайте", text: $secret)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                 }
 
                 if let error {
@@ -53,9 +67,9 @@ struct LoginView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(busy || baseURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(busy || baseURL.trimmingCharacters(in: .whitespaces).isEmpty || secret.isEmpty)
 
-                Text("Для LAN запусти player с MUSIK_PLAYER_ADDR=0.0.0.0:8787. Токен рекомендуется: он хранится в Keychain и работает и для потока, и для обложек.")
+                Text("Логин и пароль — те же, что на сайте. Приложение получит личный токен устройства и запомнит его, пароль не сохраняется. Для сервера с одним владельцем оставь логин пустым.")
                     .font(.footnote)
                     .foregroundStyle(Theme.muted)
             }
@@ -80,7 +94,7 @@ struct LoginView: View {
         error = nil
         defer { busy = false }
         do {
-            try await app.login(baseURL: baseURL, mode: mode, secret: secret)
+            try await app.login(baseURL: baseURL, mode: mode, username: username, secret: secret)
             secret = ""
         } catch is CancellationError {
         } catch {
