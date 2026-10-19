@@ -12,8 +12,6 @@ struct NowPlayingView: View {
     @EnvironmentObject var offline: OfflineStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var scrubbing = false
-    @State private var scrub: Double = 0
     @State private var pane: Pane = .queue
 
     var body: some View {
@@ -30,7 +28,7 @@ struct NowPlayingView: View {
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.isPlaying)
                             .padding(.horizontal, 24)
                         titleBlock(track)
-                        seekBar
+                        SeekBar()
                         transport
                         actions(track)
                         Picker("", selection: $pane) {
@@ -123,31 +121,6 @@ struct NowPlayingView: View {
         .padding(.horizontal, 24)
     }
 
-    private var seekBar: some View {
-        let total = max(player.duration, 1)
-        return VStack(spacing: 4) {
-            Slider(value: Binding(
-                get: { scrubbing ? scrub : min(player.position, total) },
-                set: { scrub = $0 }
-            ), in: 0...total, onEditingChanged: { editing in
-                if editing {
-                    scrub = player.position
-                    scrubbing = true
-                } else {
-                    player.seek(to: scrub)
-                    scrubbing = false
-                }
-            })
-            HStack {
-                Text(formatTime(scrubbing ? scrub : player.position))
-                Spacer()
-                Text(formatTime(player.duration))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(Theme.muted)
-        }
-        .padding(.horizontal, 24)
-    }
 
     private var transport: some View {
         HStack(spacing: 44) {
@@ -300,10 +273,45 @@ private struct QueueRow: View {
     }
 }
 
+/// The seek bar: redraws with the clock without touching the rest of the screen.
+private struct SeekBar: View {
+    @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var clock: PlaybackClock
+    @State private var scrubbing = false
+    @State private var scrub: Double = 0
+
+    var body: some View {
+        let total = max(clock.duration, 1)
+        VStack(spacing: 4) {
+            Slider(value: Binding(
+                get: { scrubbing ? scrub : min(clock.position, total) },
+                set: { scrub = $0 }
+            ), in: 0...total, onEditingChanged: { editing in
+                if editing {
+                    scrub = clock.position
+                    scrubbing = true
+                } else {
+                    player.seek(to: scrub)
+                    scrubbing = false
+                }
+            })
+            HStack {
+                Text(formatTime(scrubbing ? scrub : clock.position))
+                Spacer()
+                Text(formatTime(clock.duration))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(Theme.muted)
+        }
+        .padding(.horizontal, 24)
+    }
+}
+
 /// Plain or time-synced (LRC) lyrics; the synced line under the playhead is highlighted.
 struct LyricsView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var clock: PlaybackClock
     let trackId: Int
 
     @State private var lyrics: Lyrics?
@@ -334,7 +342,7 @@ struct LyricsView: View {
     }
 
     private var activeIndex: Int? {
-        lines.lastIndex { $0.time <= player.position + 0.3 }
+        lines.lastIndex { $0.time <= clock.position + 0.3 }
     }
 
     private func load() async {

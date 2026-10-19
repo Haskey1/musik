@@ -95,6 +95,24 @@ final class OfflineStore: ObservableObject {
         return UIImage(contentsOfFile: url.path)
     }
 
+    private nonisolated static let thumbs = NSCache<NSString, UIImage>()
+
+    /// Cover of a saved track for a list row: read and shrunk off the main thread, then
+    /// kept in memory, so scrolling does not stutter on disk reads and JPEG decoding.
+    nonisolated static func savedArtwork(_ id: Int, size: Int) async -> UIImage? {
+        let key = "\(id)@\(size)" as NSString
+        if let hit = thumbs.object(forKey: key) { return hit }
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let url = support.appendingPathComponent("Offline/\(id).jpg")
+        let image: UIImage? = await Task.detached(priority: .userInitiated) {
+            guard let data = try? Data(contentsOf: url), let full = UIImage(data: data) else { return nil }
+            let side = CGFloat(max(size, 96))  // same pixel size the server would send
+            return full.preparingThumbnail(of: CGSize(width: side, height: side)) ?? full
+        }.value
+        if let image { thumbs.setObject(image, forKey: key) }
+        return image
+    }
+
     // MARK: Saving
 
     func save(_ track: Track, auto: Bool = false) {
@@ -115,6 +133,7 @@ final class OfflineStore: ObservableObject {
         guard let s = saved.removeValue(forKey: id) else { return }
         try? FileManager.default.removeItem(at: savedDir.appendingPathComponent(s.file))
         try? FileManager.default.removeItem(at: savedDir.appendingPathComponent("\(id).jpg"))
+        Self.thumbs.removeAllObjects()
         writeIndex()
     }
 

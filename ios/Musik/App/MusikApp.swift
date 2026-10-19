@@ -9,6 +9,7 @@ struct MusikApp: App {
             RootView()
                 .environmentObject(app)
                 .environmentObject(app.player)
+                .environmentObject(app.player.clock)
                 .environmentObject(app.offline)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
@@ -59,6 +60,7 @@ struct MainView: View {
             NowPlayingView()
                 .environmentObject(app)
                 .environmentObject(player)
+                .environmentObject(player.clock)
                 .environmentObject(app.offline)
                 .presentationDragIndicator(.visible)
         }

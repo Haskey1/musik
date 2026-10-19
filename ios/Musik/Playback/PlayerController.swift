@@ -17,8 +17,15 @@ final class PlayerController: ObservableObject {
     @Published private(set) var maturity: String?
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuffering = false
-    @Published private(set) var position: Double = 0
-    @Published private(set) var duration: Double = 0
+    /// Position and duration change twice a second; they live in `clock` so that only the
+    /// seek bar, the mini player's progress line and lyrics redraw — not every list row.
+    let clock = PlaybackClock()
+    private(set) var position: Double = 0 {
+        didSet { if clock.position != position { clock.position = position } }
+    }
+    private(set) var duration: Double = 0 {
+        didSet { if clock.duration != duration { clock.duration = duration } }
+    }
     @Published private(set) var disliked = false
     /// A start / skip request is in flight.
     @Published private(set) var busy = false
@@ -935,4 +942,11 @@ enum ArtistSkips {
         guard all.removeValue(forKey: norm(artist)) != nil else { return }
         UserDefaults.standard.set(all, forKey: key)
     }
+}
+
+/// Playback position and duration, published separately from `PlayerController`.
+@MainActor
+final class PlaybackClock: ObservableObject {
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
 }

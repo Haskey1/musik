@@ -24,7 +24,10 @@ final class ImageLoader: @unchecked Sendable {
         guard !known404, let api else { return nil }
         do {
             let data = try await api.data(from: url)
-            guard let img = UIImage(data: data) else { return nil }
+            // Decode here, off the main thread; otherwise the JPEG is decoded lazily on the
+            // first draw, which is what makes a scrolling list hitch.
+            guard let raw = UIImage(data: data) else { return nil }
+            let img = raw.preparingForDisplay() ?? raw
             cache.setObject(img, forKey: url as NSURL)
             return img
         } catch let e as APIError where e.isNotFound {
@@ -71,11 +74,13 @@ struct ArtworkView: View {
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task(id: trackId) {
             image = nil
-            if let trackId, let local = OfflineStore.shared.artwork(trackId) {
+            guard let trackId else { return }
+            if OfflineStore.shared.isSaved(trackId),
+               let local = await OfflineStore.savedArtwork(trackId, size: size) {
                 image = local
                 return
             }
-            guard let trackId, let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
+            guard let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
             if let hit = ImageLoader.shared.cached(url) {
                 image = hit
                 return
