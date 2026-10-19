@@ -68,8 +68,11 @@ struct MainView: View {
         NavigationStack {
             content()
                 .withRoutes()
+                .miniPlayerSpace()
         }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
+        // The mini player floats over the tab; every scrolling screen reserves room for it
+        // (`miniPlayerSpace`), so the last rows — «Выйти» on the profile — stay reachable.
+        .overlay(alignment: .bottom) {
             if player.current != nil {
                 MiniPlayer { showPlayer = true }
                     .transition(.move(edge: .bottom).combined(with: .opacity))

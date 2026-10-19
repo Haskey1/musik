@@ -4,6 +4,9 @@ struct MiniPlayer: View {
     @EnvironmentObject var player: PlayerController
     let open: () -> Void
 
+    /// 44 pt artwork + 2 × 8 pt padding + 2 pt progress line.
+    static let height: CGFloat = 62
+
     var body: some View {
         if let track = player.current {
             VStack(spacing: 0) {

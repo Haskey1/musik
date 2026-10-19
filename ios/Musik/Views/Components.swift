@@ -12,9 +12,22 @@ extension View {
     func withRoutes() -> some View {
         navigationDestination(for: Route.self) { route in
             switch route {
-            case .artist(let name): ArtistDetailView(artist: name)
-            case .album(let artist, let album): AlbumDetailView(artist: artist, album: album)
+            case .artist(let name): ArtistDetailView(artist: name).miniPlayerSpace()
+            case .album(let artist, let album): AlbumDetailView(artist: artist, album: album).miniPlayerSpace()
             }
+        }
+    }
+
+    /// Keeps the bottom of a scrolling screen clear of the floating mini player.
+    func miniPlayerSpace() -> some View { modifier(MiniPlayerSpace()) }
+}
+
+private struct MiniPlayerSpace: ViewModifier {
+    @EnvironmentObject var player: PlayerController
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: player.current == nil ? 0 : MiniPlayer.height)
         }
     }
 }

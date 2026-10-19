@@ -96,10 +96,19 @@ final class AppState: ObservableObject {
         case .account:
             settings.token = nil
             let device = "musik iOS · \(UIDevice.current.name)"
-            settings.token = try await api.issueToken(username: username, password: secret, deviceName: device)
+            do {
+                settings.token = try await api.issueToken(username: username, password: secret, deviceName: device)
+            } catch let e as APIError where [404, 405, 409].contains(e.status) {
+                // Older server, or one without device tokens: sign in like the website does.
+                try await api.login(username: username, password: secret)
+            }
         }
-        _ = try await api.health()
-        let me = try await api.authMe()
+        let me: AuthMe
+        do {
+            me = try await api.authMe()
+        } catch let e as APIError where e.status != 0 {
+            throw APIError(status: e.status, code: e.code, message: "Вход не удался: \(e.message)")
+        }
         guard me.ok || me.authEnabled == false else {
             settings.token = nil
             throw APIError(status: 401, code: "auth_required",

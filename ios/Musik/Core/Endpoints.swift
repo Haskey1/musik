@@ -13,6 +13,12 @@ extension APIClient {
         _ = try await send("POST", "/api/auth/login", body: ["password": password], redirectOn401: false)
     }
 
+    /// Web-style sign-in (session cookie) for servers that can't issue device tokens.
+    func login(username: String, password: String) async throws {
+        _ = try await send("POST", "/api/auth/login", body: ["username": username, "password": password],
+                           redirectOn401: false)
+    }
+
     /// Multi-user sign-in: username + password give a personal device token
     /// (the same kind the web UI issues under account → device tokens).
     func issueToken(username: String, password: String, deviceName: String) async throws -> String {
@@ -24,6 +30,16 @@ extension APIClient {
             throw APIError(status: 0, code: "no_token", message: "Сервер не выдал токен")
         }
         return token
+    }
+
+    /// Quick reachability check with a short timeout (the offline player polls it).
+    func ping() async -> Bool {
+        guard let target = try? url("/api/health") else { return false }
+        var req = URLRequest(url: target, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
+        for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+        guard let result = try? await session.data(for: req) else { return false }
+        let status = (result.1 as? HTTPURLResponse)?.statusCode ?? 0
+        return status > 0 && status < 500
     }
 
     func logout() async {

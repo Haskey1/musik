@@ -8,6 +8,9 @@ struct LoginView: View {
     @State private var secret = ""
     @State private var busy = false
     @State private var error: String?
+    /// Server address and token sign-in: hidden when the app has a built-in server
+    /// (friends just type login + password); a long press on the logo shows them.
+    @State private var advanced = Settings.builtInServer.isEmpty
 
     var body: some View {
         ScrollView {
@@ -16,23 +19,27 @@ struct LoginView: View {
                     Text("musik").font(.display(56))
                         .foregroundStyle(LinearGradient(colors: [Theme.accentBright, Theme.accent],
                                                         startPoint: .leading, endPoint: .trailing))
-                    Text("Твой сервер, твой вкус. Подключись к Go player.")
+                    Text("Войди под своим логином и паролем.")
                         .foregroundStyle(Theme.muted)
                 }
                 .padding(.top, 48)
+                .contentShape(Rectangle())
+                .onLongPressGesture { withAnimation { advanced.toggle() } }
 
-                field("Адрес сервера") {
-                    TextField("https://music.example.com", text: $baseURL)
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
+                if advanced {
+                    field("Адрес сервера") {
+                        TextField("https://music.example.com", text: $baseURL)
+                            .keyboardType(.URL)
+                            .textContentType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
 
-                Picker("Вход", selection: $mode) {
-                    ForEach(AppState.LoginMode.allCases) { Text($0.rawValue).tag($0) }
+                    Picker("Вход", selection: $mode) {
+                        ForEach(AppState.LoginMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
 
                 if mode == .account {
                     field("Логин") {
@@ -69,7 +76,7 @@ struct LoginView: View {
                 .buttonStyle(PrimaryButtonStyle())
                 .disabled(busy || baseURL.trimmingCharacters(in: .whitespaces).isEmpty || secret.isEmpty)
 
-                Text("Логин и пароль — те же, что на сайте. Приложение получит личный токен устройства и запомнит его, пароль не сохраняется. Для сервера с одним владельцем оставь логин пустым.")
+                Text("Логин и пароль — те же, что на сайте. Пароль на телефоне не сохраняется.")
                     .font(.footnote)
                     .foregroundStyle(Theme.muted)
             }

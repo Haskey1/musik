@@ -61,7 +61,10 @@ final class PlayerController: ObservableObject {
     /// Entered automatically because the server went away (vs. «Сохранённые» chosen by hand);
     /// only then does the player switch back to online radio when the network returns.
     private var offlineFallback = false
-    private var onlineRetryAfter = Date.distantPast
+    /// While playing saved tracks because the server was gone: the server answers again,
+    /// so the next track boundary switches back to online radio.
+    private var serverReachable = false
+    private var probeTask: Task<Void, Never>?
     private var stallTask: Task<Void, Never>?
     private var prefetchTask: Task<Void, Never>?
     private let pathMonitor = NWPathMonitor()
@@ -343,9 +346,27 @@ final class PlayerController: ObservableObject {
     func like() {
         guard let track = current, let app else { return }
         Task {
-            if await app.toggleFavoriteTrack(track.id, track: track) == true {
+            let liked = await app.toggleFavoriteTrack(track.id, track: track)
+            self.updateFeedbackCommands()
+            if liked == true {
                 if let res = try? await self.postEvent("like", track: track) { self.applyLists(res) }
             }
+        }
+    }
+
+    /// From the lock screen or the car: a dislike also moves on to the next track.
+    func dislikeAndSkip() {
+        guard let track = current else { return }
+        if offlineMode {
+            skip()
+            return
+        }
+        Task {
+            if let res = try? await self.postEvent("dislike", track: track) {
+                self.applyLists(res)
+                self.app?.show("Дизлайк — меньше такого")
+            }
+            if track.id == self.current?.id { self.skip() }
         }
     }
 
@@ -355,7 +376,10 @@ final class PlayerController: ObservableObject {
             do {
                 guard let res = try await self.postEvent("dislike", track: track) else { return }
                 self.applyLists(res)
-                if track.id == self.current?.id { self.disliked = true }
+                if track.id == self.current?.id {
+                    self.disliked = true
+                    self.updateFeedbackCommands()
+                }
                 self.app?.show(res.ignored == true ? "Уже дизлайк" : "Дизлайк — меньше такого")
             } catch {
                 self.app?.show(error)
@@ -586,7 +610,6 @@ final class PlayerController: ObservableObject {
             app?.show("Нет сети, а сохранённых треков пока нет")
             return
         }
-        onlineRetryAfter = .distantPast
         startOffline(list, at: 0, fallback: true, name: "Без сети · сохранённое")
         app?.show("Нет сети — играю сохранённое")
     }
@@ -604,9 +627,12 @@ final class PlayerController: ObservableObject {
         queue = []
         listName = name
         load(list[index], autoplay: true)
+        if fallback { startProbe() }
     }
 
     private func leaveOffline() {
+        probeTask?.cancel()
+        serverReachable = false
         offlineMode = false
         offlineFallback = false
         offlineList = []
@@ -615,7 +641,7 @@ final class PlayerController: ObservableObject {
 
     private func offlineStep(_ delta: Int) {
         // Back online after an automatic switch: return to the radio at the track boundary.
-        if delta > 0, offlineFallback, networkUp, Date() >= onlineRetryAfter {
+        if delta > 0, offlineFallback, serverReachable {
             returnOnline()
             return
         }
@@ -645,9 +671,27 @@ final class PlayerController: ObservableObject {
                 self.apply(payload, autoplay: true)
             } catch {
                 guard req == self.requestSeq else { return }
-                // The phone has a network but the server is still out of reach: try again in a minute.
-                self.onlineRetryAfter = Date().addingTimeInterval(60)
+                // Not reachable after all: keep playing from the phone and keep checking.
+                self.serverReachable = false
+                self.startProbe()
                 self.offlineStep(+1)
+            }
+        }
+    }
+
+    /// Checks every 15 s whether the server answers again. Doesn't rely on NWPathMonitor
+    /// alone: Wi-Fi can be "up" while the server is out of reach, and the other way round.
+    private func startProbe() {
+        probeTask?.cancel()
+        probeTask = Task {
+            while !Task.isCancelled && self.offlineFallback && !self.serverReachable {
+                if self.networkUp, await self.api.ping() {
+                    guard !Task.isCancelled, self.offlineFallback else { return }
+                    self.serverReachable = true
+                    self.app?.show("Связь есть — после этого трека включу онлайн-радио")
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
             }
         }
     }
@@ -709,8 +753,8 @@ final class PlayerController: ObservableObject {
         guard up != networkUp else { return }
         networkUp = up
         if up {
-            onlineRetryAfter = .distantPast
             schedulePrefetch()
+            if offlineFallback { startProbe() }
             Task { await self.app?.reconnect() }
         } else if isBuffering {
             watchStall()
@@ -766,6 +810,25 @@ final class PlayerController: ObservableObject {
         }
         c.skipForwardCommand.isEnabled = false
         c.skipBackwardCommand.isEnabled = false
+        // Like / dislike outside the app: lock screen, Control Center, CarPlay «Now Playing».
+        c.likeCommand.localizedTitle = "Нравится"
+        c.likeCommand.localizedShortTitle = "Нравится"
+        c.likeCommand.addTarget { [weak self] _ in
+            self?.like()
+            return .success
+        }
+        c.dislikeCommand.localizedTitle = "Не нравится, дальше"
+        c.dislikeCommand.localizedShortTitle = "Не нравится"
+        c.dislikeCommand.addTarget { [weak self] _ in
+            self?.dislikeAndSkip()
+            return .success
+        }
+    }
+
+    private func updateFeedbackCommands() {
+        let c = MPRemoteCommandCenter.shared()
+        c.likeCommand.isActive = isFavorite
+        c.dislikeCommand.isActive = disliked
     }
 
     private func updateNowPlaying() {
@@ -783,6 +846,7 @@ final class PlayerController: ObservableObject {
         if let album = t.album.nonEmpty { info[MPMediaItemPropertyAlbumTitle] = album }
         if let art = nowPlayingArtwork { info[MPMediaItemPropertyArtwork] = art }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        updateFeedbackCommands()
     }
 
     private func loadNowPlayingArtwork(for track: Track) {

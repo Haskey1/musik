@@ -9,8 +9,14 @@ final class Settings: @unchecked Sendable {
 
     private let defaults = UserDefaults.standard
 
+    /// Server address built into the app (Info.plist `MusikServerURL`); empty when none.
+    static let builtInServer: String = {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "MusikServerURL") as? String ?? ""
+        return raw.hasPrefix("$(") ? "" : normalize(raw)
+    }()
+
     var baseURL: String {
-        get { defaults.string(forKey: "baseURL") ?? "" }
+        get { defaults.string(forKey: "baseURL").nonEmpty ?? Settings.builtInServer }
         set { defaults.set(Settings.normalize(newValue), forKey: "baseURL") }
     }
 
