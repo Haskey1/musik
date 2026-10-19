@@ -33,6 +33,13 @@ struct HomeView: View {
         .task { if !loaded { await load() } }
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
         .navigationBarHidden(true)
+        // No navigation bar here, so give the status bar its own backdrop:
+        // otherwise shelf titles scroll right under the clock.
+        .overlay(alignment: .top) {
+            Color.clear
+                .frame(height: 0)
+                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .top)
+        }
         .sheet(item: $shareItem) { item in
             ActivityView(items: [item.url])
                 .presentationDetents([.medium, .large])
