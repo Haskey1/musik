@@ -79,7 +79,23 @@ struct NowPlayingView: View {
                 }
             }
             Spacer()
-            Color.clear.frame(width: 24, height: 24)
+            if let track = player.current {
+                Menu {
+                    Button(role: .destructive) { player.hide(.track) } label: {
+                        Label("Скрыть этот трек", systemImage: "eye.slash")
+                    }
+                    if let artist = track.artist.nonEmpty {
+                        Button(role: .destructive) { player.hide(.artist) } label: {
+                            Label("Скрыть артиста «\(artist)»", systemImage: "person.crop.circle.badge.xmark")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.title3)
+                }
+                .accessibilityLabel("Не предлагать")
+            } else {
+                Color.clear.frame(width: 24, height: 24)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)

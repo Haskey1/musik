@@ -237,6 +237,16 @@ struct TrackMenu: View {
                 player.play(["artist": artist])
             } label: { Label("Весь артист", systemImage: "music.mic") }
         }
+        Menu {
+            Button(role: .destructive) {
+                player.hide(.track, track: track)
+            } label: { Label("Скрыть этот трек", systemImage: "eye.slash") }
+            if let artist = track.artist.nonEmpty {
+                Button(role: .destructive) {
+                    player.hide(.artist, track: track)
+                } label: { Label("Скрыть артиста «\(artist)»", systemImage: "person.crop.circle.badge.xmark") }
+            }
+        } label: { Label("Не предлагать", systemImage: "eye.slash") }
         if let album = track.album.nonEmpty {
             Button {
                 player.play(["artist": track.artist ?? "", "album": album])

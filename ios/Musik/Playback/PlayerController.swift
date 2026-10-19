@@ -238,6 +238,7 @@ final class PlayerController: ObservableObject {
             return
         }
         guard let track = current, sessionId != nil else { return }
+        if duration > 0, listened / duration < 0.3 { noteEarlySkip(track) }
         generation += 1
         let req = nextRequest()
         player.pause()
@@ -291,6 +292,7 @@ final class PlayerController: ObservableObject {
 
     private func trackFinished(gen: Int) {
         guard gen == generation, let track = current else { return }
+        ArtistSkips.reset(track.artist)
         if offlineMode {
             offlineStep(+1)
             return
@@ -347,6 +349,7 @@ final class PlayerController: ObservableObject {
         guard let track = current, let app else { return }
         Task {
             let liked = await app.toggleFavoriteTrack(track.id, track: track)
+            if liked == true { ArtistSkips.reset(track.artist) }
             self.updateFeedbackCommands()
             if liked == true {
                 if let res = try? await self.postEvent("like", track: track) { self.applyLists(res) }
@@ -384,6 +387,43 @@ final class PlayerController: ObservableObject {
             } catch {
                 self.app?.show(error)
             }
+        }
+    }
+
+    // MARK: - Hiding
+
+    enum HideTarget { case track, artist }
+
+    /// «Скрыть»: never again in radio, mixes and recommendations (undo in Profile → Скрыто).
+    func hide(_ target: HideTarget, track: Track? = nil) {
+        guard let track = track ?? current else { return }
+        let isCurrent = track.id == current?.id
+        Task {
+            do {
+                let res = try await self.api.createRule(target: target == .artist ? "artist" : "track",
+                                                        action: "block", track: track, sessionId: self.sessionId)
+                if target == .artist { ArtistSkips.reset(track.artist) }
+                self.app?.show(target == .artist ? "Артист «\(track.displayArtist)» скрыт" : "Трек скрыт")
+                if isCurrent {
+                    self.skip()
+                } else if !self.fixed, let q = res.playback?.queue {
+                    self.queue = q
+                }
+            } catch {
+                self.app?.show(error)
+            }
+        }
+    }
+
+    /// Early skips only count for the current session on the server. Three early skips of
+    /// the same artist in a row (no finished or liked track in between) make it play less
+    /// often for good — a soft rule, undone in Profile → Скрыто.
+    private func noteEarlySkip(_ track: Track) {
+        guard let artist = track.artist.nonEmpty, ArtistSkips.add(artist) == 3 else { return }
+        Task {
+            guard (try? await self.api.createRule(target: "artist", action: "downrank", track: track,
+                                                  sessionId: nil)) != nil else { return }
+            self.app?.show("«\(artist)» теперь будет звучать реже. Скрыть совсем — в меню трека")
         }
     }
 
@@ -868,5 +908,31 @@ final class PlayerController: ObservableObject {
     /// Built outside the main actor: MediaPlayer calls the handler on its own queue.
     nonisolated private static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
         MPMediaItemArtwork(boundsSize: image.size) { _ in image }
+    }
+}
+
+/// Early skips in a row per artist, kept across launches (UserDefaults).
+@MainActor
+enum ArtistSkips {
+    private static let key = "artistEarlySkips"
+
+    private static func norm(_ artist: String) -> String {
+        artist.lowercased().trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Counts one more early skip and returns the new streak.
+    static func add(_ artist: String) -> Int {
+        var all = UserDefaults.standard.dictionary(forKey: key) as? [String: Int] ?? [:]
+        let n = (all[norm(artist)] ?? 0) + 1
+        all[norm(artist)] = n
+        UserDefaults.standard.set(all, forKey: key)
+        return n
+    }
+
+    static func reset(_ artist: String?) {
+        guard let artist = artist.nonEmpty else { return }
+        var all = UserDefaults.standard.dictionary(forKey: key) as? [String: Int] ?? [:]
+        guard all.removeValue(forKey: norm(artist)) != nil else { return }
+        UserDefaults.standard.set(all, forKey: key)
     }
 }

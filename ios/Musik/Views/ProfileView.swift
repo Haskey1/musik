@@ -8,6 +8,7 @@ struct ProfileView: View {
     @State private var profile: Profile?
     @State private var health: Health?
     @State private var shares: [ShareLink] = []
+    @State private var rules: [RadioRule] = []
     @State private var shareItem: ShareItem?
     @State private var mobileStream = Settings.shared.mobileStream
     @State private var confirmLogout = false
@@ -83,6 +84,34 @@ struct ProfileView: View {
                 Text("Непрерывный MP3-эфир для VLC или браузера. Слушатели не влияют на твой вкус. Долгое нажатие — копировать, свайп — отозвать.")
             }
 
+            Section {
+                if rules.isEmpty {
+                    Text("Ничего не скрыто").foregroundStyle(Theme.muted)
+                }
+                ForEach(rules) { rule in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(ruleTitle(rule)).lineLimit(1)
+                            Text(rule.action == "block" ? "скрыто" : "реже")
+                                .font(.caption)
+                                .foregroundStyle(rule.action == "block" ? Theme.accent : Theme.muted)
+                        }
+                        Spacer()
+                        Button("Вернуть") { app.perform { try await unhide(rule) } }
+                            .buttonStyle(.borderless)
+                    }
+                    .swipeActions {
+                        Button { app.perform { try await unhide(rule) } } label: {
+                            Label("Вернуть", systemImage: "arrow.uturn.backward")
+                        }
+                    }
+                }
+            } header: {
+                Text("Скрыто и реже")
+            } footer: {
+                Text("Скрыть трек или артиста — в меню трека или «⋯» в плеере. После трёх быстрых скипов подряд артист сам попадает в «реже».")
+            }
+
             Section("Воспроизведение") {
                 Toggle("Мобильный поток (AAC/MP3)", isOn: $mobileStream)
                     .onChange(of: mobileStream) { app.settings.mobileStream = $0 }
@@ -126,9 +155,26 @@ struct ProfileView: View {
         async let p = try? api.profile()
         async let h = try? api.health()
         async let s = try? api.shares()
+        async let r = try? api.rules()
         profile = await p ?? profile
         health = await h ?? health
         shares = await s ?? shares
+        rules = (await r ?? rules).filter { ["artist", "track", "song", "album"].contains($0.targetType) }
+    }
+
+    private func ruleTitle(_ rule: RadioRule) -> String {
+        switch rule.targetType {
+        case "artist": return "Артист: \(rule.targetKey)"
+        case "album": return "Альбом: \(rule.targetKey.replacingOccurrences(of: "|", with: " — "))"
+        default: return "Трек"
+        }
+    }
+
+    private func unhide(_ rule: RadioRule) async throws {
+        try await app.api.deleteRule(rule.ruleId)
+        if rule.targetType == "artist" { ArtistSkips.reset(rule.targetKey) }
+        rules.removeAll { $0.id == rule.id }
+        app.show("Вернул")
     }
 
     private func createShare() async throws {

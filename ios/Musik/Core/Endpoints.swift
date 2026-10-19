@@ -103,6 +103,26 @@ extension APIClient {
         try await post("/api/favorites/toggle", body)
     }
 
+    // Radio rules («Скрыть», «Реже»): the server keeps them out of radio, mixes and recommendations.
+    func createRule(target: String, action: String, track: Track, sessionId: String?,
+                    strength: Double = 1) async throws -> RuleCreated {
+        var body: [String: Any] = [
+            "target_type": target, "action": action, "scope": "global", "preset": "forever",
+            "track_id": track.id, "artist": track.artist ?? "", "album": track.album ?? "",
+            "strength": strength,
+        ]
+        if let sessionId { body["session_id"] = sessionId }
+        return try await post("/api/rules", body)
+    }
+
+    func rules() async throws -> [RadioRule] {
+        try await get("/api/rules", as: RulesResponse.self).rules
+    }
+
+    func deleteRule(_ id: String) async throws {
+        _ = try await send("DELETE", "/api/rules/\(id)")
+    }
+
     func addLater(trackId: Int) async throws {
         _ = try await send("POST", "/api/later", body: ["track_id": trackId])
     }
