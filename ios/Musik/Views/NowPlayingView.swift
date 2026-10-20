@@ -18,7 +18,7 @@ struct NowPlayingView: View {
 
     var body: some View {
         ZStack {
-            Theme.backdrop
+            CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
                 ScrollView {
                     VStack(spacing: 22) {
