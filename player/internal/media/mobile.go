@@ -136,7 +136,11 @@ func (s *Service) ensureMobileFile(id int64, srcPath string) (path, ctype string
 		return "", "", err
 	}
 
-	ferr := sharedMobileFlight.do(id, func() error {
+	flightID := id
+	if format == "mp3" {
+		flightID = -id
+	}
+	ferr := sharedMobileFlight.do(flightID, func() error {
 		if dstInfo, err := os.Stat(dst); err == nil && !dstInfo.ModTime().Before(srcInfo.ModTime()) && dstInfo.Size() > 0 {
 			return nil
 		}
@@ -370,6 +374,17 @@ func (s *Service) ServeMobile(w http.ResponseWriter, r *http.Request, id int64, 
 	w.Header().Set("Accept-Ranges", "bytes")
 	w.Header().Set("Cache-Control", "private, max-age=86400")
 
+	// An explicit format is a compatibility request, not the mobile default.
+	// Never return a small ALAC/M4A original or a warm AAC entry for q=mp3.
+	format := strings.ToLower(r.URL.Query().Get("q"))
+	if format == "" {
+		format = strings.ToLower(r.URL.Query().Get("fmt"))
+	}
+	if format == "mp3" || format == "aac" {
+		s.serveFormat(w, r, id, srcPath, format)
+		return
+	}
+
 	if s.serveMobileCached(w, r, id, srcPath) {
 		return
 	}
@@ -384,4 +399,31 @@ func (s *Service) ServeMobile(w http.ResponseWriter, r *http.Request, id int64, 
 		return
 	}
 	serveFile(w, r, path, ctype)
+}
+
+// serveFormat uses the same disk cache and ffmpeg budget as mobile playback,
+// but honors the requested codec even for small originals.
+func (s *Service) serveFormat(w http.ResponseWriter, r *http.Request, id int64, srcPath, format string) {
+	src, err := os.Stat(srcPath)
+	if err != nil {
+		http.Error(w, "file missing", http.StatusNotFound)
+		return
+	}
+	dst := s.mobileCachePath(id, format)
+	key := id
+	if format == "mp3" {
+		key = -id
+	}
+	err = sharedMobileFlight.do(key, func() error {
+		if cached, e := os.Stat(dst); e == nil && cached.Size() > 0 && !cached.ModTime().Before(src.ModTime()) {
+			return nil
+		}
+		return s.transcodeMobile(srcPath, dst, format)
+	})
+	if err != nil {
+		log.Printf("compatible transcode %d: %v", id, err)
+		http.Error(w, "audio preparation failed", http.StatusBadGateway)
+		return
+	}
+	serveFile(w, r, dst, mobileContentType(format))
 }
