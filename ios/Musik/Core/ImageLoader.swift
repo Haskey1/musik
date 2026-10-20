@@ -73,6 +73,28 @@ struct ArtworkView: View {
         let photo: URL?
     }
 
+    @ViewBuilder
+    private var content: some View {
+        ZStack {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
+                    .transition(.opacity)
+            } else {
+                LinearGradient(colors: Theme.placeholder(for: trackId ?? 0),
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+                Text(fallback.prefix(1).uppercased())
+                    .font(.system(size: CGFloat(size) / 4, weight: .bold, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .minimumScaleFactor(0.2)
+                    .padding(6)
+            }
+        }
+    }
+
     @MainActor private func load() async {
         image = nil
         if let photo {
