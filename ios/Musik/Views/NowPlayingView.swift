@@ -14,6 +14,8 @@ struct NowPlayingView: View {
 
     @State private var pane: Pane = .queue
     @State private var showEqualizer = false
+    /// A sideways swipe on the cover is in progress: no scrolling, no closing meanwhile.
+    @State private var swiping = false
     @ObservedObject private var eq = Equalizer.shared
 
     var body: some View {
@@ -28,7 +30,7 @@ struct NowPlayingView: View {
                             .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
                             .scaleEffect(player.isPlaying ? 1 : 0.94)
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.isPlaying)
-                            .swipeToSkip(threshold: 90)
+                            .swipeToSkip(threshold: 90) { swiping = $0 }
                             .padding(.horizontal, 24)
                         titleBlock(track)
                         SeekBar()
@@ -60,6 +62,7 @@ struct NowPlayingView: View {
                     }
                     .padding(.bottom, 32)
                 }
+                .scrollDisabled(swiping)
             } else {
                 VStack(spacing: 12) {
                     Text("Ничего не играет").font(.title3.weight(.semibold))
@@ -70,6 +73,7 @@ struct NowPlayingView: View {
         }
         .overlay(alignment: .top) { ToastView() }
         .sheet(isPresented: $showEqualizer) { EqualizerView() }
+        .interactiveDismissDisabled(swiping)
     }
 
     // MARK: Parts

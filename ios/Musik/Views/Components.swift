@@ -340,37 +340,59 @@ struct ActivityView: UIViewControllerRepresentable {
 
 extension View {
     /// Swipe left — next track, swipe right — back. The view follows the finger a little
-    /// and springs back; vertical drags (closing the player, scrolling) are left alone.
-    func swipeToSkip(threshold: CGFloat) -> some View { modifier(SwipeToSkip(threshold: threshold)) }
+    /// and springs back. The direction is decided by the first movement: a horizontal
+    /// swipe stays horizontal (`onSwiping(true)` lets the screen freeze its scrolling and
+    /// sheet dismissal meanwhile), a vertical one is left to scrolling and closing.
+    /// `exclusive` keeps buttons under the finger from firing at the end of the swipe.
+    func swipeToSkip(threshold: CGFloat, exclusive: Bool = false,
+                     onSwiping: ((Bool) -> Void)? = nil) -> some View {
+        modifier(SwipeToSkip(threshold: threshold, exclusive: exclusive, onSwiping: onSwiping))
+    }
 }
 
 private struct SwipeToSkip: ViewModifier {
     @EnvironmentObject var player: PlayerController
     let threshold: CGFloat
+    let exclusive: Bool
+    let onSwiping: ((Bool) -> Void)?
     @State private var dx: CGFloat = 0
+    @State private var axis: Axis?
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { g in
+                if axis == nil {
+                    axis = abs(g.translation.width) > abs(g.translation.height) ? .horizontal : .vertical
+                    if axis == .horizontal { onSwiping?(true) }
+                }
+                guard axis == .horizontal else { return }
+                dx = g.translation.width * 0.6
+            }
+            .onEnded { g in
+                if axis == .horizontal {
+                    let w = g.predictedEndTranslation.width
+                    if w < -threshold {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        player.skip()
+                    } else if w > threshold {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        player.back()
+                    }
+                    onSwiping?(false)
+                }
+                axis = nil
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { dx = 0 }
+            }
+    }
 
     func body(content: Content) -> some View {
-        content
+        let moved = content
             .offset(x: dx)
             .opacity(1 - min(abs(dx) / (threshold * 4), 0.35))
-            .simultaneousGesture(
-                DragGesture(minimumDistance: 18)
-                    .onChanged { g in
-                        guard abs(g.translation.width) > abs(g.translation.height) * 1.3 else { return }
-                        dx = g.translation.width * 0.6
-                    }
-                    .onEnded { g in
-                        let horizontal = abs(g.translation.width) > abs(g.translation.height) * 1.3
-                        let w = g.predictedEndTranslation.width
-                        if horizontal && w < -threshold {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            player.skip()
-                        } else if horizontal && w > threshold {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            player.back()
-                        }
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { dx = 0 }
-                    }
-            )
+        if exclusive {
+            moved.highPriorityGesture(drag)
+        } else {
+            moved.simultaneousGesture(drag)
+        }
     }
 }

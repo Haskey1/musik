@@ -39,7 +39,7 @@ struct MiniPlayer: View {
             .background(Theme.surface.opacity(0.6))
             .contentShape(Rectangle())
             .onTapGesture(perform: open)
-            .swipeToSkip(threshold: 60)
+            .swipeToSkip(threshold: 60, exclusive: true)
         }
     }
 
