@@ -10,6 +10,7 @@ import (
 //go:embed model_default.json
 var defaultModelJSON []byte
 
+// DefaultModelVersion is the bundled linear ranker for FeatureSchemaVersion (v3).
 const DefaultModelVersion = "default-v3"
 
 type Model struct {

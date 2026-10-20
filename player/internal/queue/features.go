@@ -9,14 +9,14 @@ import (
 	"github.com/torwin-job/musik/player/internal/index"
 )
 
-// FeatureSchemaVersion is the impression feature contract.
-// v2 adds likes, finish and partial rates, impression fatigue,
-// hours since the last finish, duration, and queue position.
-// v3 counts that fatigue as shows minus radio completions, so a library
-// play no longer clears a track that was shown and not finished.
-// Source one-hots stay on the impression as quota policy and are not model
-// features: a logistic ranker would otherwise learn that exploit finishes
-// because the policy put it there. Older snapshots are dropped at training.
+// FeatureSchemaVersion is the active impression-feature contract (v3).
+//
+// History — training drops snapshots with a lower schema_version:
+//   - v2: likes, finish/partial rates, impression fatigue, hours since finish, duration, queue position
+//   - v3: impression_fatigue = log1p(shows − radio_completions); a library play does not clear
+//     fatigue from a shown-but-not-finished radio impression
+//
+// Source one-hots stay on the impression as quota policy, not model features.
 const FeatureSchemaVersion = 3
 
 // FeatureOrder is filled from ranker_spec.json so Go and Python share one list.

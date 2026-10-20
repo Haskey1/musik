@@ -176,12 +176,11 @@ def test_source_one_hot_is_not_a_model_feature() -> None:
 
 
 def test_golden_feature_order_file() -> None:
-    # Schema v3 kept these names. Only the impression_fatigue formula changed.
-    golden = Path(__file__).parent / "golden" / "feature_order_v2.txt"
+    golden = Path(__file__).parent / "golden" / "feature_order_v3.txt"
     assert golden.read_text().splitlines() == FEATURE_ORDER
 
 
-def test_v2_listening_features_match_go_scale() -> None:
+def test_schema_v3_listening_features_match_go_scale() -> None:
     values = feature_vector(
         plays=4,
         finishes=3,

@@ -9,8 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-# v3 counts impression_fatigue as shows minus radio completions.
-# A library play does not clear it. Training drops older snapshots.
+# Active feature contract (v3). v2 added listening/impression fields; v3 fixes
+# impression_fatigue to shows minus radio completions (library plays do not clear it).
+# Training drops snapshots with schema_version < FEATURE_SCHEMA_VERSION.
 FEATURE_SCHEMA_VERSION = 3
 SPEC_PATH = (
     Path(__file__).resolve().parents[3] / "player" / "internal" / "queue" / "ranker_spec.json"

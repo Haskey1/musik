@@ -802,7 +802,7 @@ func TestLatestPoliciesAndTrainingRuns(t *testing.T) {
 	}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.DB.Exec(`INSERT INTO model_versions(model_version,model_type,feature_schema_version,artifact_path,artifact_hash,status,created_at,profile_id) VALUES ('ranker-v2','ranker',1,'/test/ranker.json','hash','active',?,?)`, daysAgo(0), store.ProfileID); err != nil {
+	if _, err := store.DB.Exec(`INSERT INTO model_versions(model_version,model_type,feature_schema_version,artifact_path,artifact_hash,status,created_at,profile_id) VALUES ('default-v3','ranker',3,'/test/ranker.json','hash','active',?,?)`, daysAgo(0), store.ProfileID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.DB.Exec(`
@@ -810,7 +810,7 @@ INSERT INTO training_runs(
   run_id, model_version, model_type, feature_schema_version, train_from, train_until,
   positive_count, negative_count, metrics_schema_version, metrics_json, status, created_at, profile_id
 ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		NewID(), "ranker-v2", "linear", 1, "2026-01-01", "2026-02-01",
+		NewID(), "default-v3", "linear", 3, "2026-01-01", "2026-02-01",
 		12, 8, 1, `{"auc":0.71}`, "completed", daysAgo(0), store.ProfileID,
 	); err != nil {
 		t.Fatal(err)

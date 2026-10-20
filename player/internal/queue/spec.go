@@ -9,8 +9,8 @@ import (
 //go:embed ranker_spec.json
 var rankerSpecJSON []byte
 
-// RankerSpec is the shared Go/Python contract: feature order, source thresholds,
-// quotas, MMR and the transition profiles. model_default.json stays the weights.
+// RankerSpec is the shared Go/Python contract (schema_version 3): feature order,
+// source thresholds, quotas, MMR and transition profiles. Weights live in model_default.json.
 type RankerSpec struct {
 	SchemaVersion int      `json:"schema_version"`
 	FeatureOrder  []string `json:"feature_order"`

@@ -368,7 +368,7 @@ func TestBuildCoreFillsRepeatAndTransition(t *testing.T) {
 	}
 }
 
-func TestVectorV2ListeningFeatures(t *testing.T) {
+func TestVectorSchemaV3ListeningFeatures(t *testing.T) {
 	now := time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 	values := VectorFromInputs(FeatureInputs{
 		Meta: index.Meta{
