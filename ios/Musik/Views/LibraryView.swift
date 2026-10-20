@@ -159,6 +159,30 @@ struct LibraryView: View {
         ])
     }
 
+    /// Artists of a track list: each credited artist, by number of tracks; the cover is
+    /// the first of their tracks that has artwork.
+    static func groupArtists(_ tracks: [Track]) -> [ArtistItem] {
+        var by: [String: ArtistItem] = [:]
+        var hasArt: Set<String> = []
+        for t in tracks {
+            let names = (t.artists ?? []).compactMap { Optional($0).nonEmpty }
+            for raw in names.isEmpty ? [t.artist.nonEmpty ?? "Unknown"] : names {
+                let name = raw.trimmingCharacters(in: .whitespaces)
+                let key = name.lowercased()
+                var item = by[key] ?? ArtistItem(artist: name, tracks: 0, coverTrackId: t.id)
+                item.tracks = (item.tracks ?? 0) + 1
+                if t.artwork != nil, !hasArt.contains(key) {
+                    item.coverTrackId = t.id
+                    hasArt.insert(key)
+                }
+                by[key] = item
+            }
+        }
+        return by.values.sorted {
+            ($0.tracks ?? 0, $1.artist) > ($1.tracks ?? 0, $0.artist)
+        }
+    }
+
     private func load() async {
         let api = app.api
         async let t = try? api.library()
@@ -166,7 +190,11 @@ struct LibraryView: View {
         async let al = try? api.albums()
         async let f = try? api.favorites()
         tracks = await t ?? tracks
-        artists = await ar ?? artists
+        // Artists come from the same track list as the Tracks tab (as on the web), so
+        // every artist found there is found here too; the server's list only has
+        // tracks the radio index already holds.
+        let grouped = Self.groupArtists(tracks)
+        artists = grouped.isEmpty ? (await ar ?? artists) : grouped
         albums = await al ?? albums
         favorites = await f ?? favorites
         loaded = true

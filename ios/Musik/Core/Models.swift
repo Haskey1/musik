@@ -7,6 +7,8 @@ import Foundation
 struct Track: Decodable, Identifiable, Hashable {
     var id: Int
     var artist: String?
+    /// Credited artists split by the server ('Thomas / БИ-2 / Сплин'); library rows only.
+    var artists: [String]?
     var title: String?
     var album: String?
     var duration: Double?
