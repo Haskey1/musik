@@ -5,24 +5,43 @@ struct ArtistDetailView: View {
     @EnvironmentObject var player: PlayerController
     let artist: String
 
+    @ObservedObject private var photos = ArtistPhotos.shared
     @State private var tracks: [Track] = []
     @State private var similar: [ArtistItem] = []
     @State private var loaded = false
+    @State private var tint = Theme.surfaceHigh
+    @State private var collapsed = false
+
+    private var photo: URL? { photos.fullURL(for: artist, api: app.api) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                DetailHeader(
-                    coverTrackId: tracks.first?.id,
-                    artist: artist,
-                    title: artist,
-                    subtitle: "\(tracks.count) треков",
-                    round: true,
-                    isFavorite: app.favoriteArtists.contains(artist),
-                    onPlay: { player.play(["artist": artist]) },
-                    onRadio: radioAction,
-                    onFavorite: { Task { await app.toggleFavoriteArtist(artist) } }
-                )
+                if let photo {
+                    ArtistHero(
+                        artist: artist,
+                        photo: photo,
+                        subtitle: "\(tracks.count) треков",
+                        isFavorite: app.favoriteArtists.contains(artist),
+                        onPlay: { player.play(["artist": artist]) },
+                        onRadio: radioAction,
+                        onFavorite: { Task { await app.toggleFavoriteArtist(artist) } },
+                        tint: $tint,
+                        collapsed: $collapsed
+                    )
+                } else {
+                    DetailHeader(
+                        coverTrackId: tracks.first?.id,
+                        artist: artist,
+                        title: artist,
+                        subtitle: "\(tracks.count) треков",
+                        round: true,
+                        isFavorite: app.favoriteArtists.contains(artist),
+                        onPlay: { player.play(["artist": artist]) },
+                        onRadio: radioAction,
+                        onFavorite: { Task { await app.toggleFavoriteArtist(artist) } }
+                    )
+                }
 
                 let albums = albumsOfArtist
                 if albums.count > 1 {
@@ -44,10 +63,25 @@ struct ArtistDetailView: View {
                 }
             }
             .padding(.bottom, 24)
+            // the photo's colour under the header, fading into the usual background
+            .background(alignment: .top) {
+                if photo != nil {
+                    VStack(spacing: 0) {
+                        tint.frame(height: ArtistHero.height)
+                        LinearGradient(colors: [tint, tint.opacity(0)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 520)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
         }
+        .coordinateSpace(name: ArtistHero.coordinateSpace)
+        .ignoresSafeArea(edges: photo != nil ? .top : [])
         .background(Theme.backdrop)
-        .navigationTitle(artist)
+        .navigationTitle(photo == nil || collapsed ? artist : "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(photo == nil ? .automatic : (collapsed ? .visible : .hidden), for: .navigationBar)
+        .animation(.easeInOut(duration: 0.2), value: collapsed)
         .task {
             guard !loaded else { return }
             let api = app.api

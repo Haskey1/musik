@@ -30,6 +30,12 @@ final class ArtistPhotos: ObservableObject {
         return try? api.url(path, query: [URLQueryItem(name: "w", value: String(width))])
     }
 
+    /// The photo as found online (Deezer gives 1000 px), for a full-width header.
+    func fullURL(for artist: String?, api: APIClient?) -> URL? {
+        guard let artist, let path = paths[Self.key(artist)], let api else { return nil }
+        return try? api.url(path, query: [URLQueryItem(name: "full", value: "1")])
+    }
+
     /// Fetches the list; at most once in ten minutes unless forced.
     func refresh(_ api: APIClient, force: Bool = false) async {
         if !force, let loadedAt, Date().timeIntervalSince(loadedAt) < 600 { return }
