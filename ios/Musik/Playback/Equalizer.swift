@@ -106,15 +106,15 @@ final class Equalizer: ObservableObject {
             unprepare: tapUnprepare,
             process: tapProcess
         )
-        var tap: MTAudioProcessingTap?
+        var tap: Unmanaged<MTAudioProcessingTap>?
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
                                                 MTAudioProcessingTapCreationFlags(kMTAudioProcessingTapCreationFlag_PostEffects),
                                                 &tap)
-        if status != noErr {
+        guard status == noErr, let tap else {
             Unmanaged<TapContext>.fromOpaque(callbacks.clientInfo!).release()
             return nil
         }
-        return tap
+        return tap.takeRetainedValue()
     }
 }
 
