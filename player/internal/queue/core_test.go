@@ -2,6 +2,7 @@ package queue
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"slices"
 	"testing"
@@ -470,5 +471,91 @@ func TestOutcomeTransitionDelta(t *testing.T) {
 	}
 	if got := db.OutcomeTransitionDelta("early_skip", true); got < -0.151 || got > -0.149 {
 		t.Fatalf("manual skip %v", got)
+	}
+}
+
+// varietyIndex: one artist with a whole discography right next to the taste, and
+// twelve artists with a single track each, a little further away.
+func varietyIndex(t *testing.T) *index.Index {
+	t.Helper()
+	idx := index.New(config.Config{NewTrackDays: 30, NewBoostTauDays: 14})
+	rows := make([]db.TrackRow, 0, 52)
+	for id := int64(1); id <= 40; id++ {
+		rows = append(rows, db.TrackRow{
+			ID: id, Artist: "Big", Title: fmt.Sprintf("Big %d", id), Album: "Discography",
+			Path: fmt.Sprintf("/big/%d.flac", id), Duration: 180,
+			Embedding: index.Float32Bytes([]float32{1, 0.01 * float32(id%5)}), Dim: 2,
+		})
+	}
+	for i := int64(0); i < 12; i++ {
+		id := 100 + i
+		rows = append(rows, db.TrackRow{
+			ID: id, Artist: fmt.Sprintf("Small %d", i), Title: "Song", Album: "Single",
+			Path: fmt.Sprintf("/small/%d.flac", i), Duration: 180,
+			Embedding: index.Float32Bytes([]float32{0.9, 0.3}), Dim: 2,
+		})
+	}
+	if err := idx.Load(rows); err != nil {
+		t.Fatal(err)
+	}
+	return idx
+}
+
+func TestBigDiscographyDoesNotFillTheQueue(t *testing.T) {
+	b := NewBuilder(varietyIndex(t), config.Config{QueueSize: 6})
+	items := b.BuildCore(CoreOpts{CurrentID: 100, Taste: []float32{1, 0}, Size: 6})
+	if len(items) != 6 {
+		t.Fatalf("len=%d", len(items))
+	}
+	big := 0
+	for _, item := range items {
+		if item.Artist == "Big" {
+			big++
+		}
+	}
+	if big > 1 {
+		t.Fatalf("artist with the biggest discography took %d of 6 places", big)
+	}
+}
+
+func TestArtistJustHeardWaits(t *testing.T) {
+	b := NewBuilder(varietyIndex(t), config.Config{QueueSize: 6})
+	items := b.BuildCore(CoreOpts{
+		CurrentID: 1, Taste: []float32{1, 0}, Size: 6,
+		RecentArtists: []string{index.ArtistKey("Big")},
+	})
+	for _, item := range items {
+		if item.Artist == "Big" {
+			t.Fatalf("artist of the current track queued again: %+v", item)
+		}
+	}
+	if len(items) != 6 {
+		t.Fatalf("len=%d", len(items))
+	}
+}
+
+func TestSmallLibraryStillFillsTheQueue(t *testing.T) {
+	// two artists only, both just heard: the queue is still full
+	idx := index.New(config.Config{NewTrackDays: 30, NewBoostTauDays: 14})
+	rows := make([]db.TrackRow, 0, 16)
+	for id := int64(1); id <= 16; id++ {
+		artist := "Near"
+		if id > 8 {
+			artist = "Far"
+		}
+		rows = append(rows, db.TrackRow{
+			ID: id, Artist: artist, Title: fmt.Sprintf("Song %d", id), Album: "Album",
+			Path: fmt.Sprintf("/%d.flac", id), Duration: 180,
+			Embedding: index.Float32Bytes([]float32{1, 0.05 * float32(id)}), Dim: 2,
+		})
+	}
+	if err := idx.Load(rows); err != nil {
+		t.Fatal(err)
+	}
+	b := NewBuilder(idx, config.Config{QueueSize: 6})
+	items := b.BuildCore(CoreOpts{CurrentID: 1, Taste: []float32{1, 0}, Size: 6,
+		RecentArtists: []string{index.ArtistKey("Near"), index.ArtistKey("Far")}})
+	if len(items) < 6 {
+		t.Fatalf("two-artist library gave %d tracks", len(items))
 	}
 }

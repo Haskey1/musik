@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -390,8 +391,10 @@ def apply_quotas(
     *,
     size: int,
     quotas: dict[str, tuple[int, int]] | None = None,
+    artist_cap: int | None = None,
 ) -> list[dict[str, Any]]:
     """Fill minimums from the scarce end of the arm list, then open maxima.
+    With ``artist_cap``, no artist takes more places than that.
 
     A track is filed under every label. The arm that takes it is written back
     as ``source``, so a forgotten hit that is also close to taste can close
@@ -406,14 +409,27 @@ def apply_quotas(
     chosen: list[dict[str, Any]] = []
     used: set[int] = set()
     counts: dict[str, int] = {src: 0 for src in SOURCE_PRIORITY}
+    per_artist: dict[str, int] = {}
+
+    def artist_full(item: dict[str, Any]) -> bool:
+        if artist_cap is None:
+            return False
+        k = artist_key(item.get("artist") or "")
+        return bool(k) and per_artist.get(k, 0) >= artist_cap
+
+    def take(item: dict[str, Any]) -> None:
+        k = artist_key(item.get("artist") or "")
+        per_artist[k] = per_artist.get(k, 0) + 1
+
     for source in reversed(SOURCE_PRIORITY):
         want = quotas.get(source, (0, 0))[0]
         for item in by_source.get(source, []):
             if len(chosen) >= size or counts[source] >= want:
                 break
             tid = int(item["track_id"])
-            if tid in used:
+            if tid in used or artist_full(item):
                 continue
+            take(item)
             taken = dict(item)
             taken["source"] = source
             chosen.append(taken)
@@ -423,11 +439,12 @@ def apply_quotas(
         if len(chosen) >= size:
             break
         tid = int(item["track_id"])
-        if tid in used:
+        if tid in used or artist_full(item):
             continue
         slot = _quota_slot(item, counts, quotas)
         if slot is None:
             continue
+        take(item)
         taken = dict(item)
         taken["source"] = slot
         chosen.append(taken)
@@ -903,6 +920,82 @@ def _wildcard_rows(index: Any, taste: list[float], pool: int, allow: Any, negati
     return _top_k(score, pool, lambda row: score[row] > -1.5)
 
 
+# Artist variety. A big discography sits close to itself in embedding space,
+# so without limits one artist (or two) fills a whole mix.
+MAX_POOL_PER_ARTIST = 6     # candidates per artist taken into the 200-track pool
+CATALOG_PENALTY = 0.04      # score cost growing with the artist's catalog size
+_ARTIST_SPLIT = re.compile(r"\s*(?:,|&|;|/|\bfeat\.?|\bft\.?|\bfeaturing\b|\bx\b|\bи\b)\s*", re.IGNORECASE)
+
+
+def artist_key(artist: str) -> str:
+    """Main credited artist, case and spacing aside: 'Лида feat. GSPD' → 'лида'."""
+    name = (artist or "").strip().lower().replace("ё", "е")
+    main = _ARTIST_SPLIT.split(name, maxsplit=1)[0].strip()
+    return re.sub(r"\s+", " ", main or name)
+
+
+def mix_artist_cap(size: int) -> int:
+    """Tracks one artist may take in a mix of this size: 3 in 40, 2 in 30."""
+    return max(2, round(size / 13))
+
+
+_counts_cache: dict[int, tuple[int, dict[str, int]]] = {}
+
+
+def _artist_counts(index: Any) -> dict[str, int]:
+    cached = _counts_cache.get(id(index))
+    if cached and cached[0] == index.size:
+        return cached[1]
+    counts: dict[str, int] = {}
+    for meta in index.meta:
+        k = artist_key(meta.get("artist") or "")
+        if k:
+            counts[k] = counts.get(k, 0) + 1
+    _counts_cache.clear()
+    _counts_cache[id(index)] = (index.size, counts)
+    return counts
+
+
+def cap_artists(items: list[dict[str, Any]], *, size: int, cap: int) -> list[dict[str, Any]]:
+    """The first `size` items, in order, with at most `cap` per artist. When that
+    leaves the list short (a library of few artists), the limit is raised one step
+    at a time until it is filled."""
+    limit = max(1, cap)
+    while True:
+        chosen: list[dict[str, Any]] = []
+        seen: set[int] = set()
+        counts: dict[str, int] = {}
+        for item in items:
+            tid = int(item["track_id"])
+            k = artist_key(item.get("artist") or "")
+            if tid in seen or (k and counts.get(k, 0) >= limit):
+                continue
+            chosen.append(item)
+            seen.add(tid)
+            counts[k] = counts.get(k, 0) + 1
+            if len(chosen) >= size:
+                return chosen
+        if limit >= size or len(seen) == len({int(i["track_id"]) for i in items}):
+            return chosen
+        limit += 1
+
+
+def spread_artists(items: list[dict[str, Any]], gap: int = 4) -> list[dict[str, Any]]:
+    """Reorder so the same artist comes back no sooner than `gap` tracks later,
+    when the list allows it; otherwise the order is kept."""
+    rest = list(items)
+    out: list[dict[str, Any]] = []
+    while rest:
+        recent = {artist_key(x.get("artist") or "") for x in out[-gap:]}
+        pick = next((i for i, x in enumerate(rest) if artist_key(x.get("artist") or "") not in recent), None)
+        if pick is None:
+            # the closest-to-free artist: the one heard longest ago
+            last = {artist_key(x.get("artist") or ""): n for n, x in enumerate(out)}
+            pick = min(range(len(rest)), key=lambda i: last.get(artist_key(rest[i].get("artist") or ""), -1))
+        out.append(rest.pop(pick))
+    return out
+
+
 def _arm_rows(
     index: Any,
     *,
@@ -915,6 +1008,8 @@ def _arm_rows(
     now: datetime,
     pool: int,
     negative: Any,
+    max_per_artist: int = 0,
+    cooling: set[str] | None = None,
 ) -> list[int]:
     md5s = list(getattr(index, "md5s", []) or [])
     current_md5 = ""
@@ -938,13 +1033,44 @@ def _arm_rows(
             seen.add(row)
             rows.append(row)
 
-    add(_top_k(taste_sims, pool, allow))
-    add(_transition_rows(index, current_meta, current_sims, transitions, pool, allow))
+    # Similarity-driven arms look deeper and keep a few tracks per artist, so the
+    # nearest big discography does not take the whole arm. Mirrors Go CollectCandidates.
+    wide = pool * 4 if max_per_artist > 0 else pool
+
+    def capped(picked: list[int], limit: int) -> list[int]:
+        return _cap_rows(index, picked, max_per_artist, limit)
+
+    add(capped(_top_k(taste_sims, wide, allow), pool))
+    add(capped(_transition_rows(index, current_meta, current_sims, transitions, pool, allow), 0))
     add(_resurface_rows(index, now, pool, allow))
     add(_new_rows(index, now, pool, allow))
-    add(_adjacent_rows(taste_sims, pool, allow))
+    add(capped(_adjacent_rows(taste_sims, wide, allow), pool))
     add(_wildcard_rows(index, taste_sims, pool, allow, negative))
+    rows = _cap_rows(index, rows, max_per_artist, 0)
+    if cooling:
+        # artists heard a moment ago wait, unless nobody else is left
+        fresh = [r for r in rows if artist_key(index.meta[r].get("artist") or "") not in cooling]
+        if fresh:
+            rows = fresh
     return rows
+
+
+def _cap_rows(index: Any, rows: list[int], max_per_artist: int, limit: int) -> list[int]:
+    """Rows in order, at most ``max_per_artist`` per artist (< 1: no cap) and at most
+    ``limit`` rows (< 1: no limit)."""
+    out: list[int] = []
+    per: dict[str, int] = {}
+    for row in rows:
+        if limit > 0 and len(out) >= limit:
+            break
+        if max_per_artist > 0:
+            k = artist_key(index.meta[row].get("artist") or "")
+            if k:
+                if per.get(k, 0) >= max_per_artist:
+                    continue
+                per[k] = per.get(k, 0) + 1
+        out.append(row)
+    return out
 
 
 def rank_index(
@@ -961,8 +1087,16 @@ def rank_index(
     transitions: dict[int, float] | None = None,
     profile: str = "smooth",
     negative: Any = None,
+    artist_cap: int | None = None,
+    recent_artists: Iterable[str] = (),
 ) -> list[dict[str, Any]]:
     """Score an embedding index by arm, then apply the shared quotas.
+
+    Artist variety: no artist takes more than MAX_POOL_PER_ARTIST places in an
+    arm, or ``artist_cap`` (default mix_artist_cap(size)) places in the result;
+    artists with big catalogs pay a small score cost; the same artist is spread
+    apart in the order; artists in ``recent_artists`` (just heard) are left out
+    while anyone else is available.
 
     ``pool`` is the width of each arm. When omitted, retrieval.source_pool
     from the spec is used. The cosine top is no longer the only cutoff.
@@ -982,8 +1116,7 @@ def rank_index(
     else:
         current_sims = taste_sims
     current_meta, current_row = _matched_current(index, current)
-    rows = _arm_rows(
-        index,
+    arm_args = dict(
         taste_sims=taste_sims,
         current_sims=current_sims,
         current_meta=current_meta,
@@ -994,6 +1127,12 @@ def rank_index(
         pool=arm_pool,
         negative=negative,
     )
+    cooling = {artist_key(a) for a in recent_artists if a}
+    rows = _arm_rows(index, **arm_args, max_per_artist=MAX_POOL_PER_ARTIST, cooling=cooling)
+    if len(rows) < min(size, index.size - len(forbidden)):
+        # a library of a few artists: no per-artist limit on the arms
+        rows = _arm_rows(index, **arm_args, cooling=cooling)
+    catalog = _artist_counts(index)
     items: list[dict[str, Any]] = []
     for row_i in rows:
         meta = index.meta[row_i]
@@ -1024,7 +1163,8 @@ def rank_index(
                 "row": row_i,
                 "source": primary_source(sources),
                 "sources": sources,
-                "score": model.score(features),
+                "score": model.score(features)
+                - CATALOG_PENALTY * math.log1p(catalog.get(artist_key(meta.get("artist") or ""), 0) / 4),
                 "features": features,
                 "sim_taste": sim_taste,
                 "sim_current": sim_current,
@@ -1033,15 +1173,13 @@ def rank_index(
                 "cluster_id": meta.get("cluster_id"),
             }
         )
+    cap = artist_cap if artist_cap is not None else mix_artist_cap(size)
     quotas = scale_quotas(size, explore_ratio=explore_ratio)
-    chosen = apply_quotas(items, size=size, quotas=quotas)
+    chosen = apply_quotas(items, size=size, quotas=quotas, artist_cap=cap)
     if len(chosen) < size:
-        used = {int(item["track_id"]) for item in chosen}
-        for item in items:
-            if len(chosen) >= size:
-                break
-            if int(item["track_id"]) in used:
-                continue
-            chosen.append(item)
-            used.add(int(item["track_id"]))
-    return chosen[:size]
+        # arms ran dry under their maximums: the best of the rest, still per-artist
+        # capped (the cap loosens only when the library cannot fill the mix)
+        ids = {int(item["track_id"]) for item in chosen}
+        by_score = sorted(items, key=lambda x: (-float(x["score"]), int(x["track_id"])))
+        chosen = cap_artists(chosen + [i for i in by_score if int(i["track_id"]) not in ids], size=size, cap=cap)
+    return spread_artists(chosen[:size])

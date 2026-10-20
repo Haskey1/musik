@@ -60,6 +60,9 @@ type CandidateOpts struct {
 	Pool        int
 	Transitions map[int64]float64
 	Negative    func([]float32) float64
+	// MaxPerArtist caps how many tracks of one artist enter the pool (0 = no cap), so
+	// an artist with a whole discography in the library cannot fill it alone.
+	MaxPerArtist int
 }
 
 func CollectCandidates(idx *index.Index, currentID int64, opts CandidateOpts) []Candidate {
@@ -154,12 +157,22 @@ func CollectCandidates(idx *index.Index, currentID int64, opts CandidateOpts) []
 			rows = append(rows, row)
 		}
 	}
-	addRows(topK(exploitScore, pool, allow))
-	addRows(transitionRows(idx, currentMeta, currentSim, opts.Transitions, pool, allow))
+	// Similarity-driven sources look deeper and keep a few tracks per artist, so the
+	// nearest big discography does not take the whole source.
+	wide := pool
+	if opts.MaxPerArtist > 0 {
+		wide = pool * 4
+	}
+	capped := func(rows []int, limit int) []int {
+		return capPerArtist(idx, rows, opts.MaxPerArtist, limit)
+	}
+	addRows(capped(topK(exploitScore, wide, allow), pool))
+	addRows(capped(transitionRows(idx, currentMeta, currentSim, opts.Transitions, pool, allow), 0))
 	addRows(resurfaceRows(idx, opts.Now, pool, allow))
 	addRows(newInLibraryRows(idx, opts.Now, pool, allow))
-	addRows(adjacentRows(tasteSim, pool, allow))
+	addRows(capped(adjacentRows(tasteSim, wide, allow), pool))
 	addRows(wildcardRows(idx, tasteSim, byKind["far"], opts.Negative, pool, allow))
+	rows = capPerArtist(idx, rows, opts.MaxPerArtist, 0)
 
 	out := make([]Candidate, 0, len(rows))
 	for _, row := range rows {
@@ -401,6 +414,32 @@ func farCentroid(centroids [][]float32, taste []float32) []float32 {
 		}
 	}
 	return centroids[bestI]
+}
+
+// capPerArtist keeps rows in order with at most max per artist (max < 1: no cap),
+// and at most limit rows (limit < 1: no limit).
+func capPerArtist(idx *index.Index, rows []int, max, limit int) []int {
+	if max < 1 {
+		if limit > 0 && len(rows) > limit {
+			return rows[:limit]
+		}
+		return rows
+	}
+	out := make([]int, 0, len(rows))
+	per := map[string]int{}
+	for _, row := range rows {
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+		if ak := index.ArtistKey(idx.MetaAt(row).Artist); ak != "" {
+			if per[ak] >= max {
+				continue
+			}
+			per[ak]++
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func topK(score []float32, k int, allow func(int) bool) []int {

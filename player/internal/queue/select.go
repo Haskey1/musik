@@ -206,6 +206,26 @@ func Select(cands []ScoredCandidate, opts SelectOpts) []ScoredCandidate {
 			mark(c)
 		}
 	}
+
+	// A small library may not have enough artists for the limit: loosen it step by
+	// step rather than return a short queue.
+	if len(selected) < opts.Size && opts.Idx != nil {
+		ordered := append([]ScoredCandidate(nil), cands...)
+		sortByScore(ordered)
+		for limit := opts.ArtistLimit + 1; len(selected) < opts.Size && limit <= opts.Size; limit++ {
+			opts.ArtistLimit = limit
+			for _, c := range ordered {
+				if len(selected) >= opts.Size {
+					break
+				}
+				if !canTake(c) {
+					continue
+				}
+				selected = append(selected, c)
+				mark(c)
+			}
+		}
+	}
 	return selected
 }
 

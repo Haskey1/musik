@@ -313,6 +313,7 @@ func (e *Engine) RefreshQueue(sess *Session, currentID int64, reason string) {
 		DaypartName: dp, ContextIDs: sess.ActiveContextIDs,
 		Discover: e.Discovering(), Allocation: &decision,
 		LearnedTransition: e.learnedTransition(),
+		RecentArtists:     e.recentArtists(sess, currentID),
 	})
 	if reason != "" && sess.Mode != "share" {
 		requestID := db.NewID()
@@ -589,4 +590,33 @@ func (e *Engine) rebuildTasteCentroids() {
 		})
 	}
 	_ = e.Store.ReplaceTasteCentroids(taste.CentroidAlgorithmVersion, out)
+}
+
+// recentArtists lists the artists of the current track and of the last tracks heard
+// (any session, last 6 hours), most recent first, for the radio's artist cooldown.
+// The artist a station was started from is left out: that radio is meant to come
+// back to them.
+func (e *Engine) recentArtists(sess *Session, currentID int64) []string {
+	if e.Idx == nil {
+		return nil
+	}
+	ids := []int64{currentID}
+	if e.Store != nil {
+		if hist, err := e.Store.RecentTrackIDs(6, 12); err == nil {
+			ids = append(ids, hist...)
+		}
+	}
+	anchor := ""
+	if sess != nil && (sess.Anchor.Kind == "artist" || sess.Anchor.Kind == "album") {
+		anchor = index.ArtistKey(sess.Anchor.Artist)
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if row, ok := e.Idx.RowOf(id); ok {
+			if ak := index.ArtistKey(e.Idx.MetaAt(row).Artist); ak != anchor {
+				out = append(out, ak)
+			}
+		}
+	}
+	return out
 }
