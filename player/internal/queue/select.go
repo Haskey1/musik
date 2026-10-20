@@ -209,18 +209,33 @@ func Select(cands []ScoredCandidate, opts SelectOpts) []ScoredCandidate {
 
 	// A small library may not have enough artists for the limit: loosen it step by
 	// step rather than return a short queue.
+	// (Rows the passes above skipped are marked used; only the chosen ones count here.)
 	if len(selected) < opts.Size && opts.Idx != nil {
+		chosen := map[int]bool{}
+		for _, c := range selected {
+			chosen[c.Row] = true
+		}
 		ordered := append([]ScoredCandidate(nil), cands...)
 		sortByScore(ordered)
 		for limit := opts.ArtistLimit + 1; len(selected) < opts.Size && limit <= opts.Size; limit++ {
-			opts.ArtistLimit = limit
 			for _, c := range ordered {
 				if len(selected) >= opts.Size {
 					break
 				}
-				if !canTake(c) {
+				if chosen[c.Row] {
 					continue
 				}
+				meta := opts.Idx.MetaAt(c.Row)
+				if artistCount[strings.ToLower(meta.Artist)] >= limit {
+					continue
+				}
+				if meta.FileMD5 != "" && usedMD5[meta.FileMD5] {
+					continue
+				}
+				if key := index.SongKey(meta.Artist, meta.Title); key != "" && usedSong[key] {
+					continue
+				}
+				chosen[c.Row] = true
 				selected = append(selected, c)
 				mark(c)
 			}
