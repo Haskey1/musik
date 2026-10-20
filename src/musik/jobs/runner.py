@@ -32,6 +32,7 @@ JOB_KINDS = frozenset(
         "full_rescan",
         "mix_pack",
         "train_ranker",
+        "artist_photos",
     }
 )
 
@@ -177,6 +178,24 @@ def _run_train_ranker(payload: dict[str, Any]) -> dict[str, Any]:
     return train_ranker(force=bool(payload.get("force", False)))
 
 
+def _run_artist_photos(payload: dict[str, Any]) -> dict[str, Any]:
+    """Photos for artists that have none yet (Deezer); see `musik artist-photos`."""
+    from musik.artwork.artists import fetch_library_artist_photos
+
+    limit = payload.get("limit")
+    result = fetch_library_artist_photos(
+        limit=int(limit) if limit is not None else None,
+        force=bool(payload.get("force", False)),
+    )
+    return {
+        "queued": result.total,
+        "found": result.found,
+        "missing": result.missing,
+        "failed": result.failed,
+        "rate_limited": result.rate_limited,
+    }
+
+
 def _run_album_tips(payload: dict[str, Any]) -> dict[str, Any]:
     return rebuild_discover_tips(
         new_album_days=int(payload.get("new_album_days", 14)),
@@ -235,6 +254,8 @@ def _process_job(job: dict[str, Any]) -> dict[str, Any]:
         return _run_full_rescan(payload, job_id=job_id)
     if kind == "train_ranker":
         return _run_train_ranker(payload)
+    if kind == "artist_photos":
+        return _run_artist_photos(payload)
     raise ValueError(f"unknown job kind: {kind}")
 
 
