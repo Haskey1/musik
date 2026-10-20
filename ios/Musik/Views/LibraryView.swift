@@ -69,7 +69,7 @@ struct LibraryView: View {
         ForEach(artists.filter { matches($0.artist) }) { a in
             NavigationLink(value: Route.artist(a.artist)) {
                 HStack(spacing: 12) {
-                    ArtworkView(trackId: a.coverTrackId, size: 96, fallback: a.artist, cornerRadius: 22)
+                    ArtistAvatar(artist: a.artist, coverTrackId: a.coverTrackId, size: 96, cornerRadius: 22)
                         .frame(width: 44, height: 44)
                     VStack(alignment: .leading) {
                         Text(a.artist).lineLimit(1)

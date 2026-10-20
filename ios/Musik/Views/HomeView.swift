@@ -29,7 +29,10 @@ struct HomeView: View {
             }
             .padding(.bottom, 24)
         }
-        .refreshable { await load() }
+        .refreshable {
+            await app.refreshArtistPhotos(force: true)
+            await load()
+        }
         .task { if !loaded { await load() } }
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
         .navigationBarHidden(true)

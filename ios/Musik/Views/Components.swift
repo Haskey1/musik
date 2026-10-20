@@ -122,7 +122,7 @@ struct ArtistCard: View {
     var body: some View {
         NavigationLink(value: Route.artist(artist.artist)) {
             VStack(spacing: 6) {
-                ArtworkView(trackId: artist.coverTrackId, size: 256, fallback: artist.artist, cornerRadius: 60)
+                ArtistAvatar(artist: artist.artist, coverTrackId: artist.coverTrackId, size: 256, cornerRadius: 60)
                     .frame(width: 112, height: 112)
                 Text(artist.artist).font(.subheadline.weight(.semibold)).lineLimit(1)
                 if let n = artist.tracks {

@@ -54,6 +54,7 @@ final class AppState: ObservableObject {
             if me.ok || me.authEnabled == false {
                 phase = .ready
                 await refreshFavorites()
+                Task { await refreshArtistPhotos(force: true) }
                 await player.restore()
             } else {
                 phase = .login
@@ -77,6 +78,7 @@ final class AppState: ObservableObject {
         offlineLaunch = false
         homeRevision += 1
         await refreshFavorites()
+        await refreshArtistPhotos(force: true)
     }
 
     enum LoginMode: String, CaseIterable, Identifiable {
@@ -119,6 +121,7 @@ final class AppState: ObservableObject {
         }
         phase = .ready
         await refreshFavorites()
+        await refreshArtistPhotos(force: true)
     }
 
     func logout() async {
@@ -127,6 +130,7 @@ final class AppState: ObservableObject {
         settings.token = nil
         HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
         ImageLoader.shared.clear()
+        ArtistPhotos.shared.clear()
         favoriteTracks = []
         favoriteArtists = []
         favoriteAlbums = []
@@ -142,6 +146,10 @@ final class AppState: ObservableObject {
     }
 
     // MARK: Favorites
+
+    func refreshArtistPhotos(force: Bool = false) async {
+        await ArtistPhotos.shared.refresh(api, force: force)
+    }
 
     func refreshFavorites() async {
         guard let fav = try? await api.favorites() else { return }

@@ -14,6 +14,7 @@ struct ArtistDetailView: View {
             VStack(alignment: .leading, spacing: 22) {
                 DetailHeader(
                     coverTrackId: tracks.first?.id,
+                    artist: artist,
                     title: artist,
                     subtitle: "\(tracks.count) треков",
                     round: true,
@@ -134,6 +135,8 @@ struct AlbumDetailView: View {
 
 private struct DetailHeader: View {
     let coverTrackId: Int?
+    /// Set on an artist page: the artist's photo instead of a track cover.
+    var artist: String? = nil
     let title: String
     let subtitle: String
     let round: Bool
@@ -144,7 +147,13 @@ private struct DetailHeader: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            ArtworkView(trackId: coverTrackId, size: 640, fallback: title, cornerRadius: round ? 110 : 18)
+            Group {
+                if let artist {
+                    ArtistAvatar(artist: artist, coverTrackId: coverTrackId, size: 640, cornerRadius: 110)
+                } else {
+                    ArtworkView(trackId: coverTrackId, size: 640, fallback: title, cornerRadius: round ? 110 : 18)
+                }
+            }
                 .frame(width: 220, height: 220)
                 .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
             VStack(spacing: 4) {

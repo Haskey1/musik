@@ -45,11 +45,14 @@ final class ImageLoader: @unchecked Sendable {
 }
 
 /// Square cover for a track id. Sizes follow the server buckets: 96 / 256 / 640.
+/// With `artist`, the artist's photo is shown when the server has one, the track
+/// cover otherwise.
 struct ArtworkView: View {
     let trackId: Int?
     var size: Int = 256
     var fallback: String = "♪"
     var cornerRadius: CGFloat = 10
+    var artist: String? = nil
 
     @State private var image: UIImage?
 
@@ -62,7 +65,19 @@ struct ArtworkView: View {
             .overlay { content }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .task(id: trackId) { await load() }
+            .task(id: LoadKey(trackId: trackId, photo: photoURL)) { await load() }
+    }
+
+    private struct LoadKey: Hashable {
+        let trackId: Int?
+        let photo: URL?
+    }
+
+    /// Read without observing ArtistPhotos: a cover in a long list must not redraw
+    /// when the photo list changes. Artist views pass `artist` and observe it themselves.
+    @MainActor private var photoURL: URL? {
+        guard artist != nil else { return nil }
+        return ArtistPhotos.shared.url(for: artist, width: size, api: ImageLoader.shared.api)
     }
 
     @ViewBuilder
@@ -87,8 +102,18 @@ struct ArtworkView: View {
         }
     }
 
-    private func load() async {
+    @MainActor private func load() async {
         image = nil
+        if let photo = photoURL {
+            if let hit = ImageLoader.shared.cached(photo) {
+                image = hit
+                return
+            }
+            if let loaded = await ImageLoader.shared.image(photo) {
+                withAnimation(.easeOut(duration: 0.25)) { image = loaded }
+                return
+            }
+        }
         guard let trackId else { return }
         if OfflineStore.shared.isSaved(trackId),
            let local = await OfflineStore.savedArtwork(trackId, size: size) {
