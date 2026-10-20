@@ -54,11 +54,26 @@ struct ArtworkView: View {
     @State private var image: UIImage?
 
     var body: some View {
+        // A square frame first, the picture laid over it and clipped: a wide or tall
+        // cover (some files carry a whole collage) fills the square instead of
+        // stretching the row and spilling over the text next to it.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { content }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .task(id: trackId) { await load() }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         ZStack {
             if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
                     .transition(.opacity)
             } else {
                 LinearGradient(colors: Theme.placeholder(for: trackId ?? 0),
@@ -70,23 +85,22 @@ struct ArtworkView: View {
                     .padding(6)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .task(id: trackId) {
-            image = nil
-            guard let trackId else { return }
-            if OfflineStore.shared.isSaved(trackId),
-               let local = await OfflineStore.savedArtwork(trackId, size: size) {
-                image = local
-                return
-            }
-            guard let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
-            if let hit = ImageLoader.shared.cached(url) {
-                image = hit
-                return
-            }
-            let loaded = await ImageLoader.shared.image(url)
-            withAnimation(.easeOut(duration: 0.25)) { image = loaded }
+    }
+
+    private func load() async {
+        image = nil
+        guard let trackId else { return }
+        if OfflineStore.shared.isSaved(trackId),
+           let local = await OfflineStore.savedArtwork(trackId, size: size) {
+            image = local
+            return
         }
+        guard let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
+        if let hit = ImageLoader.shared.cached(url) {
+            image = hit
+            return
+        }
+        let loaded = await ImageLoader.shared.image(url)
+        withAnimation(.easeOut(duration: 0.25)) { image = loaded }
     }
 }
