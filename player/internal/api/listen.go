@@ -67,6 +67,7 @@ func (s *Server) handleListenShare(w http.ResponseWriter, r *http.Request) {
 		flusher.Flush()
 	}
 
+	// Memory only: a listener must not create a play_session of the owner.
 	sess := s.Play.StartShare()
 
 	ctx := r.Context()

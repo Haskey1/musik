@@ -14,7 +14,7 @@ type contextWrite struct {
 	Kind            string          `json:"kind"`
 	Name            string          `json:"name"`
 	Icon            string          `json:"icon"`
-	Influence       float64         `json:"influence"`
+	Influence       *float64        `json:"influence"`
 	LearningEnabled *bool           `json:"learning_enabled"`
 	Seeds           db.ContextSeeds `json:"seeds"`
 }
@@ -39,7 +39,10 @@ func (s *Server) handleContextsCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := db.TasteContext{
 		Kind: req.Kind, Name: req.Name, Icon: req.Icon,
-		Influence: req.Influence, Seeds: req.Seeds, LearningEnabled: true,
+		Seeds: req.Seeds, LearningEnabled: true,
+	}
+	if req.Influence != nil {
+		ctx.Influence = *req.Influence
 	}
 	if req.LearningEnabled != nil {
 		ctx.LearningEnabled = *req.LearningEnabled

@@ -254,10 +254,7 @@ func (e *Engine) pickAllowedStart(sess *Session, seed *int64) int64 {
 		return startID
 	}
 	e.excludeRuleTargets(sess)
-	if id := e.Builder.PickRandom(sess.Exclude); id != 0 {
-		return id
-	}
-	return 0
+	return e.pickRandomOrRelax(sess)
 }
 
 // Start opens a radio-style session in mode ("radio" or "session").

@@ -8,7 +8,7 @@ import (
 )
 
 // A forgotten station anchors on tracks this profile finished often and then left alone:
-// at least three finishes, last played more than sixty days ago.
+// at least three finishes, last finished more than sixty days ago.
 const (
 	forgottenMinFinishes = 3
 	forgottenStaleDays   = 60
@@ -41,7 +41,7 @@ type RadioAnchor struct {
 
 // RadioStart is the optional station anchor for Start.
 // Session, when set, retunes that radio session instead of opening a new one.
-// Station "forgotten" anchors on tracks with high finishes and an old last play.
+// Station "forgotten" anchors on tracks with high finishes and an old last finish.
 type RadioStart struct {
 	Artist    string
 	Album     string

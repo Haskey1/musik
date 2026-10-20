@@ -10,12 +10,13 @@ import (
 	"github.com/torwin-job/musik/player/internal/taste"
 )
 
-// TasteContextPatch is the fields a context update may change. Zero values
-// leave the stored field as it is.
+// TasteContextPatch is the fields a context update may change. An empty name
+// or icon leaves that field unchanged. A nil Influence leaves the weight
+// unchanged; a pointer to zero stores zero.
 type TasteContextPatch struct {
 	Name            string
 	Icon            string
-	Influence       float64
+	Influence       *float64
 	LearningEnabled *bool
 	Seeds           db.ContextSeeds
 }
@@ -43,8 +44,8 @@ func UpdateTasteContext(ctx context.Context, store *db.Store, idx *index.Index, 
 	if patch.Icon != "" {
 		existing.Icon = patch.Icon
 	}
-	if patch.Influence > 0 {
-		existing.Influence = patch.Influence
+	if patch.Influence != nil {
+		existing.Influence = *patch.Influence
 	}
 	if patch.LearningEnabled != nil {
 		existing.LearningEnabled = *patch.LearningEnabled

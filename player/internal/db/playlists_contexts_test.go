@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"testing"
+	"time"
 )
 
 func insertTracks(t *testing.T, store *Store, n int) {
@@ -240,6 +242,58 @@ func TestListUserPlaylistsCountsAndBatchAddRollsBack(t *testing.T) {
 		if item.Name == "Битый" {
 			t.Fatalf("rolled-back playlist is visible: %+v", item)
 		}
+	}
+}
+
+func TestLoadTransitionGraphPrefersDecayedWeight(t *testing.T) {
+	store, _ := openTestStore(t)
+	insertTracks(t, store, 6)
+	now := time.Now().UTC()
+	if err := store.BumpTransition(1, 2, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BumpTransition(1, 4, 9); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BumpTransition(1, 5, 4); err != nil {
+		t.Fatal(err)
+	}
+	insertDecay := func(to int64, weight float64, updated time.Time) {
+		t.Helper()
+		if _, err := store.DB.Exec(`
+INSERT INTO transition_stats(
+  from_id, to_id, manual_count, radio_count, finished_count, partial_count,
+  skip_count, decayed_weight, updated_at, profile_id
+) VALUES (1, ?, 0, 1, 0, 0, 0, ?, ?, ?)`, to, weight, updated.Format(time.RFC3339Nano), store.ProfileID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertDecay(3, 0.4, now)
+	insertDecay(4, 0.2, now)
+	insertDecay(5, 0, now)
+	insertDecay(6, -0.3, now)
+	insertDecay(2, 2, now.Add(-90*24*time.Hour))
+
+	graph, err := store.LoadTransitionGraph()
+	if err != nil {
+		t.Fatal(err)
+	}
+	edges := graph[1]
+	near := func(got, want float64) bool { return math.Abs(got-want) < 1e-6 }
+	if !near(edges[2], 1) {
+		t.Fatalf("stale decay edge=%v, want about 1", edges[2])
+	}
+	if !near(edges[3], 0.4) {
+		t.Fatalf("decay-only edge=%v", edges[3])
+	}
+	if !near(edges[4], 0.2) {
+		t.Fatalf("decay should replace raw weight, got %v", edges[4])
+	}
+	if _, ok := edges[5]; ok {
+		t.Fatalf("zero decay row fell back to raw weight: %v", edges[5])
+	}
+	if !near(edges[6], -0.3) {
+		t.Fatalf("negative skip edge=%v", edges[6])
 	}
 }
 

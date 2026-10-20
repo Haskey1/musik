@@ -10,7 +10,7 @@ import (
 //go:embed model_default.json
 var defaultModelJSON []byte
 
-const DefaultModelVersion = "default-v1"
+const DefaultModelVersion = "default-v3"
 
 type Model struct {
 	SchemaVersion int       `json:"schema_version"`

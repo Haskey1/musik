@@ -208,10 +208,10 @@ func forgottenEngine(t *testing.T) *Engine {
 	recent := time.Now().UTC().AddDate(0, 0, -2).Format(time.RFC3339Nano)
 	idx := index.New(cfg)
 	idx.Attach(cat, map[int64]db.TrackStats{
-		11: {Finishes: 5, Plays: 6, LastPlayedAt: old},
-		12: {Finishes: 4, Plays: 4, LastPlayedAt: old},
-		22: {Finishes: 8, Plays: 9, LastPlayedAt: recent},
-		33: {Finishes: 1, Plays: 2, LastPlayedAt: old},
+		11: {Finishes: 5, Plays: 6, LastFinishedAt: old, LastPlayedAt: recent},
+		12: {Finishes: 4, Plays: 4, LastFinishedAt: old},
+		22: {Finishes: 8, Plays: 9, LastFinishedAt: recent},
+		33: {Finishes: 1, Plays: 2, LastFinishedAt: old},
 	})
 	built := New(cfg, engine.Store, idx, tp, queue.NewBuilder(idx, cfg))
 	for _, row := range rows {

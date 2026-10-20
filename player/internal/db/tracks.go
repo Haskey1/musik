@@ -105,13 +105,17 @@ func (s *Store) LoadEmbeddings(ids []int64) (map[int64][]byte, error) {
 
 // TrackStats are one profile's counters for a track.
 type TrackStats struct {
-	Shown        int
-	SkipEarly    int
-	Completed    int
-	Plays        int
-	Finishes     int
-	EarlySkips   int
-	LastPlayedAt string
+	Shown          int
+	SkipEarly      int
+	Completed      int
+	Plays          int
+	Finishes       int
+	Partial        int
+	EarlySkips     int
+	Likes          int
+	Dislikes       int
+	LastPlayedAt   string
+	LastFinishedAt string
 }
 
 // LoadTrackStats reads this profile's recommendation and listening counters.
@@ -135,20 +139,24 @@ func (s *Store) LoadTrackStats() (map[int64]TrackStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err = s.DB.Query(`SELECT track_id, plays, finishes, early_skips, COALESCE(last_played_at,'') FROM track_stats WHERE profile_id = ?`, s.ProfileID)
+	rows, err = s.DB.Query(`
+SELECT track_id, plays, finishes, partial, early_skips, likes, dislikes,
+       COALESCE(last_played_at,''), COALESCE(last_finished_at,'')
+FROM track_stats WHERE profile_id = ?`, s.ProfileID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var id int64
-		var plays, finishes, early int
-		var last string
-		if err := rows.Scan(&id, &plays, &finishes, &early, &last); err != nil {
+		var plays, finishes, partial, early, likes, dislikes int
+		var last, finished string
+		if err := rows.Scan(&id, &plays, &finishes, &partial, &early, &likes, &dislikes, &last, &finished); err != nil {
 			return nil, err
 		}
 		st := out[id]
-		st.Plays, st.Finishes, st.EarlySkips, st.LastPlayedAt = plays, finishes, early, last
+		st.Plays, st.Finishes, st.Partial, st.EarlySkips = plays, finishes, partial, early
+		st.Likes, st.Dislikes, st.LastPlayedAt, st.LastFinishedAt = likes, dislikes, last, finished
 		out[id] = st
 	}
 	return out, rows.Err()

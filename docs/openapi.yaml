@@ -617,7 +617,7 @@ paths:
       summary: Recommend from favorites
       responses:
         '200':
-          description: tracks/artists/albums
+          description: Tracks, artists and albums from favorites. Liked tracks outside the cosine top stay eligible. Empty favorites return empty=true and hint.
   /api/jobs:
     get:
       summary: List jobs

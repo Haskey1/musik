@@ -265,6 +265,10 @@ type LifecycleEvent struct {
 type LifecycleResult struct {
 	Inserted         bool
 	LifecycleChanged bool
+	// AlreadyClosed is true when this event did not win the lifecycle
+	// transition because the impression was already closed, or an earlier
+	// track_end/skip for it is already stored.
+	AlreadyClosed bool
 }
 
 // ApplyLifecycleEvent appends an event exactly once and conditionally advances
@@ -331,6 +335,9 @@ WHERE profile_id=? AND impression_id=? AND session_id=? AND track_id=? AND legac
 			if err == nil {
 				out.LifecycleChanged, _ = changed(result)
 			}
+			if err == nil && !out.LifecycleChanged {
+				out.AlreadyClosed, err = s.impressionAlreadyClosed(tx, ev)
+			}
 		} else if err == nil {
 			var prior int
 			err = tx.QueryRow(`
@@ -338,6 +345,7 @@ SELECT COUNT(*) FROM listening_history
 WHERE profile_id=? AND session_id=? AND track_id=? AND action IN ('track_end','skip') AND event_id!=?`,
 				s.ProfileID, ev.SessionID, ev.TrackID, ev.EventID).Scan(&prior)
 			out.LifecycleChanged = err == nil && prior == 0
+			out.AlreadyClosed = err == nil && prior > 0
 		}
 		if err == nil && out.LifecycleChanged {
 			finish, partial, early := 0, 0, 0
@@ -405,6 +413,33 @@ ON CONFLICT(profile_id,track_id) DO UPDATE SET
 		return LifecycleResult{}, err
 	}
 	return out, nil
+}
+
+// impressionAlreadyClosed reports whether this end/skip lost because the
+// impression was already closed or an earlier end/skip for it is stored.
+// The current event row is excluded: it was inserted in this transaction.
+func (s *Store) impressionAlreadyClosed(tx *Tx, ev LifecycleEvent) (bool, error) {
+	var closed int
+	err := tx.QueryRow(`
+SELECT CASE WHEN closed_at IS NOT NULL OR outcome != 'pending' THEN 1 ELSE 0 END
+FROM recommendation_impressions
+WHERE profile_id=? AND impression_id=? AND session_id=? AND track_id=? AND legacy=0`,
+		s.ProfileID, ev.ImpressionID, ev.SessionID, ev.TrackID).Scan(&closed)
+	if errors.Is(err, sql.ErrNoRows) {
+		closed = 0
+		err = nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var prior int
+	if err := tx.QueryRow(`
+SELECT COUNT(*) FROM listening_history
+WHERE profile_id=? AND impression_id=? AND action IN ('track_end','skip') AND event_id!=?`,
+		s.ProfileID, ev.ImpressionID, ev.EventID).Scan(&prior); err != nil {
+		return false, err
+	}
+	return closed > 0 || prior > 0, nil
 }
 
 func changed(result sql.Result) (bool, error) {

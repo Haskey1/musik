@@ -10,6 +10,14 @@ const WEEKDAY_RU = {
   weekday_sun: "вс",
 };
 
+function closeEventId(trackId) {
+  const id = Number(trackId) || 0;
+  if (!closeEvent || closeEvent.trackId !== id) {
+    closeEvent = { trackId: id, eventId: randomId() };
+  }
+  return closeEvent.eventId;
+}
+
 function randomId() {
   // crypto.randomUUID() exists only in a secure context: over http on a LAN
   // address — the setup docs/DEPLOY.md recommends for phones — it is undefined,
@@ -65,6 +73,7 @@ let plAddSort = "artist";
 let libTimer = null;
 let seeking = false;
 let playbackGen = 0;
+let closeEvent = null; // one event_id for track_end/skip of the track now closing
 let unplayableRun = 0; // tracks in a row that failed to play
 let toastTimer = null;
 let jobPollTimer = null;
@@ -1148,6 +1157,7 @@ function renderNow(track, { autoplay = true, startAt = 0, listened = 0, announce
   const audio = $("audio");
   const url = track.stream || `/api/stream/${track.id}`;
   if (audio.dataset.trackId !== String(track.id)) {
+    closeEvent = null;
     const gen = bumpPlayback();
     audio.dataset.trackId = String(track.id);
     audio.dataset.gen = String(gen);
@@ -1524,9 +1534,10 @@ async function postEvent(type, extra = {}) {
   }
   const startedGen = playbackGen;
   const audio = $("audio");
+  const closing = type === "track_end" || type === "skip";
   const body = {
     type,
-    event_id: extra.event_id || randomId(),
+    event_id: extra.event_id || (closing ? closeEventId(extra.track_id ?? current?.id) : randomId()),
     track_id: current?.id,
     session_id: sessionId,
     impression_id: extra.impression_id || current?.impression_id,
@@ -1554,6 +1565,10 @@ async function postEvent(type, extra = {}) {
       $("playlist").hidden = true;
       $("queue").hidden = false;
     }
+  }
+  if (closing && data.ignored) {
+    const nextId = Number(data.next?.id || data.next_id || 0);
+    if (!nextId || nextId === Number(current?.id)) return data;
   }
   if (data.next) {
     if (startedGen !== playbackGen) return data;

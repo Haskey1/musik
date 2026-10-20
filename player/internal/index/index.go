@@ -23,26 +23,30 @@ type Meta struct {
 	// Artists holds the collaborator segments from the database (row.artists).
 	Artists []string
 	// AlbumArtist is the album-level credit; empty when the tags have none.
-	AlbumArtist  string
-	Album        string
-	Duration     float64
-	FileMD5      string
-	CreatedAt    time.Time
-	ArtworkPath  string
-	ClusterID    int
-	Shown        int
-	SkipEarly    int
-	Completed    int
-	Year         int
-	BPM          float64
-	LUFS         float64
-	HasBPM       bool
-	HasLUFS      bool
-	KeyName      string
-	Plays        int
-	Finishes     int
-	EarlySkips   int
-	LastPlayedAt time.Time
+	AlbumArtist    string
+	Album          string
+	Duration       float64
+	FileMD5        string
+	CreatedAt      time.Time
+	ArtworkPath    string
+	ClusterID      int
+	Shown          int
+	SkipEarly      int
+	Completed      int
+	Year           int
+	BPM            float64
+	LUFS           float64
+	HasBPM         bool
+	HasLUFS        bool
+	KeyName        string
+	Plays          int
+	Finishes       int
+	Partial        int
+	EarlySkips     int
+	Likes          int
+	Dislikes       int
+	LastPlayedAt   time.Time
+	LastFinishedAt time.Time
 }
 
 type Index struct {
@@ -518,8 +522,9 @@ func (idx *Index) Dot(row int, vec []float32) float32 {
 	return s
 }
 
-// ForgottenRows returns tracks this profile finished often and last played
+// ForgottenRows returns tracks this profile finished often and last finished
 // strictly before olderThan, most-finished and then oldest first.
+// A later play that was not a finish does not reset the clock.
 func (idx *Index) ForgottenRows(minFinishes int, olderThan time.Time) []int {
 	if idx == nil || minFinishes < 1 {
 		return nil
@@ -533,10 +538,10 @@ func (idx *Index) ForgottenRows(minFinishes int, olderThan time.Time) []int {
 	hits := make([]hit, 0)
 	for i := 0; i < idx.N; i++ {
 		st := idx.statsLocked(i)
-		if st.Finishes < minFinishes || st.LastPlayedAt.IsZero() || !st.LastPlayedAt.Before(olderThan) {
+		if st.Finishes < minFinishes || st.LastFinishedAt.IsZero() || !st.LastFinishedAt.Before(olderThan) {
 			continue
 		}
-		hits = append(hits, hit{row: i, finishes: st.Finishes, last: st.LastPlayedAt})
+		hits = append(hits, hit{row: i, finishes: st.Finishes, last: st.LastFinishedAt})
 	}
 	sort.Slice(hits, func(a, b int) bool {
 		if hits[a].finishes != hits[b].finishes {
@@ -554,6 +559,46 @@ func (idx *Index) ForgottenRows(minFinishes int, olderThan time.Time) []int {
 	return rows
 }
 
+// LikedRows returns up to limit tracks with at least one like, skipping ids
+// in skip. Highest likes come first; equal likes break toward the smaller id.
+func (idx *Index) LikedRows(limit int, skip map[int64]bool) []int {
+	if idx == nil || limit < 1 {
+		return nil
+	}
+	idx.mu.RLock()
+	defer idx.mu.RUnlock()
+	type hit struct {
+		row, likes int
+		id         int64
+	}
+	hits := make([]hit, 0)
+	for i := 0; i < idx.N; i++ {
+		id := idx.Meta[i].ID
+		if skip[id] {
+			continue
+		}
+		likes := idx.statsLocked(i).Likes
+		if likes <= 0 {
+			continue
+		}
+		hits = append(hits, hit{row: i, likes: likes, id: id})
+	}
+	sort.Slice(hits, func(a, b int) bool {
+		if hits[a].likes != hits[b].likes {
+			return hits[a].likes > hits[b].likes
+		}
+		return hits[a].id < hits[b].id
+	})
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	rows := make([]int, len(hits))
+	for i, h := range hits {
+		rows[i] = h.row
+	}
+	return rows
+}
+
 func (idx *Index) MetaAt(row int) Meta {
 	idx.mu.RLock()
 	defer idx.mu.RUnlock()
@@ -563,7 +608,9 @@ func (idx *Index) MetaAt(row int) Meta {
 	m := idx.Meta[row]
 	st := idx.statsLocked(row)
 	m.Shown, m.SkipEarly, m.Completed = st.Shown, st.SkipEarly, st.Completed
-	m.Plays, m.Finishes, m.EarlySkips, m.LastPlayedAt = st.Plays, st.Finishes, st.EarlySkips, st.LastPlayedAt
+	m.Plays, m.Finishes, m.Partial, m.EarlySkips = st.Plays, st.Finishes, st.Partial, st.EarlySkips
+	m.Likes, m.Dislikes = st.Likes, st.Dislikes
+	m.LastPlayedAt, m.LastFinishedAt = st.LastPlayedAt, st.LastFinishedAt
 	return m
 }
 

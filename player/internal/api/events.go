@@ -48,9 +48,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			"mode":       sess.Mode,
 			"next_id":    res.NextID,
 			"ended":      res.Ended,
+			"ignored":    res.Ignored,
 			"index":      sess.DailyPos,
 			"name":       sess.PlaylistName,
 			"fixed":      playback.IsFixedMode(sess.Mode),
+		}
+		if res.Ignored {
+			out["reason"] = res.IgnoreReason
 		}
 		annotateRadio(out, sess)
 		if playback.IsFixedMode(sess.Mode) {

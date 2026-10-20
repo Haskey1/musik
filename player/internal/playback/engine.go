@@ -13,13 +13,14 @@ import (
 )
 
 type Engine struct {
-	Cfg        config.Config
-	Store      *db.Store
-	Idx        *index.Index
-	Taste      *taste.Profile
-	TasteState *taste.State
-	Builder    *queue.Builder
-	Ranker     queue.Model
+	Cfg             config.Config
+	Store           *db.Store
+	Idx             *index.Index
+	Taste           *taste.Profile
+	TasteState      *taste.State
+	Builder         *queue.Builder
+	Ranker          queue.Model
+	TransitionModel queue.TransitionModel
 
 	Enqueue func(func())
 	Flush   func()
@@ -35,7 +36,9 @@ type Engine struct {
 func New(cfg config.Config, store *db.Store, idx *index.Index, tp *taste.Profile, builder *queue.Builder) *Engine {
 	engine := &Engine{
 		Cfg: cfg, Store: store, Idx: idx, Taste: tp, TasteState: taste.NewState(tp), Builder: builder,
-		Ranker: queue.LoadRuntimeModel(cfg.RankerPath), sessions: map[string]*Session{},
+		Ranker:          queue.LoadRuntimeModel(cfg.RankerPath),
+		TransitionModel: queue.LoadRuntimeTransition(queue.TransitionPath(cfg.RankerPath)),
+		sessions:        map[string]*Session{},
 	}
 	if rows, err := store.LoadTasteStates(); err == nil {
 		for _, row := range rows {
@@ -148,6 +151,15 @@ func (e *Engine) ReloadTransitions() {
 
 func (e *Engine) ReloadRanker() {
 	e.Ranker = queue.LoadRuntimeModel(e.Cfg.RankerPath)
+	e.TransitionModel = queue.LoadRuntimeTransition(queue.TransitionPath(e.Cfg.RankerPath))
+}
+
+func (e *Engine) learnedTransition() *queue.TransitionModel {
+	if !e.TransitionModel.Ready() {
+		return nil
+	}
+	model := e.TransitionModel
+	return &model
 }
 
 func (e *Engine) radioPrefs() db.RadioPrefs {

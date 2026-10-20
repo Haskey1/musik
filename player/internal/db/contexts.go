@@ -135,8 +135,10 @@ func updateTasteContext(q sqlQuery, profileID string, ctx TasteContext) (int64, 
 	if !ctx.LearningEnabled {
 		learning = 0
 	}
-	sets := []string{"learning_enabled = ?", "updated_at = ?"}
-	args := []any{learning, now}
+	// Influence is the resolved weight, including zero. Callers that omit the
+	// field keep the stored value before they reach this write.
+	sets := []string{"learning_enabled = ?", "influence = ?", "updated_at = ?"}
+	args := []any{learning, ctx.Influence, now}
 	if ctx.Name != "" {
 		sets = append(sets, "name = ?")
 		args = append(args, ctx.Name)
@@ -144,10 +146,6 @@ func updateTasteContext(q sqlQuery, profileID string, ctx TasteContext) (int64, 
 	if ctx.Icon != "" {
 		sets = append(sets, "icon = ?")
 		args = append(args, ctx.Icon)
-	}
-	if ctx.Influence > 0 {
-		sets = append(sets, "influence = ?")
-		args = append(args, ctx.Influence)
 	}
 	if seedsJSON.Valid {
 		sets = append(sets, "seeds_schema_version = ?", "seeds_json = ?")

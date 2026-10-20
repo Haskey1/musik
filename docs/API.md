@@ -181,7 +181,7 @@ JSON, кроме стрима, обложек, фото и `POST /api/library/up
 | POST | `/api/favorites/toggle` | переключить |
 | GET | `/api/favorites/status` | `?type=track\|artist\|album` и id или имя → `{favorited}` |
 | GET | `/api/recommend/seed` | `?type=` и `track_id`, `artist` или `album` — похожие треки |
-| GET | `/api/recommend/favorites` | по центроидам избранного |
+| GET | `/api/recommend/favorites` | микс по любимым трекам, артистам и альбомам. Лайкнутое вне топа похожих тоже может попасть. Ответ: `tracks`, `artists`, `albums`, `based_on`, `explanation`; пустое избранное — `empty: true` и `hint` |
 | GET | `/api/discover/albums` | подсказки новых альбомов |
 | GET | `/api/discover/resurfaced` | давно не открытый каталог |
 

@@ -439,7 +439,7 @@ func TestLifecycleEventsAreIdempotent(t *testing.T) {
 		t.Fatalf("end result=%+v err=%v", result, err)
 	}
 	end.EventID = "end-second-client-id"
-	if result, err := store.ApplyLifecycleEvent(end); err != nil || result.LifecycleChanged {
+	if result, err := store.ApplyLifecycleEvent(end); err != nil || result.LifecycleChanged || !result.Inserted || !result.AlreadyClosed {
 		t.Fatalf("second close result=%+v err=%v", result, err)
 	}
 	var plays, finishes int
@@ -828,6 +828,40 @@ INSERT INTO training_runs(
 	}
 	if runs[0].Metrics["auc"] != 0.71 {
 		t.Fatalf("metrics=%v", runs[0].Metrics)
+	}
+}
+
+func TestReplaceTasteCentroidsEmptyDeletesThatVersion(t *testing.T) {
+	store, _ := openTestStore(t)
+	current := TasteCentroidRow{
+		Index: 0, Vector: []byte{1, 2, 3, 4}, EmbeddingDim: 1,
+		Mass: 1, SampleCount: 2, AlgorithmVersion: "weighted-spherical-kmeans-v1",
+	}
+	other := current
+	other.AlgorithmVersion = "other"
+	if err := store.ReplaceTasteCentroids(current.AlgorithmVersion, []TasteCentroidRow{current}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ReplaceTasteCentroids(other.AlgorithmVersion, []TasteCentroidRow{other}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.ReplaceTasteCentroids(current.AlgorithmVersion, nil); err != nil {
+		t.Fatal(err)
+	}
+	left, err := store.LoadTasteCentroids(current.AlgorithmVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(left) != 0 {
+		t.Fatalf("centroids=%d, want the empty replace to delete this version", len(left))
+	}
+	kept, err := store.LoadTasteCentroids(other.AlgorithmVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0].AlgorithmVersion != "other" {
+		t.Fatalf("other version=%v", kept)
 	}
 }
 

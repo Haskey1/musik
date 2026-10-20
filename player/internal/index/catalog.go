@@ -292,20 +292,25 @@ func (c *Catalog) Track(id int64) (Meta, bool) {
 
 // Stats holds one profile's counters for a track.
 type Stats struct {
-	Shown        int
-	SkipEarly    int
-	Completed    int
-	Plays        int
-	Finishes     int
-	EarlySkips   int
-	LastPlayedAt time.Time
+	Shown          int
+	SkipEarly      int
+	Completed      int
+	Plays          int
+	Finishes       int
+	Partial        int
+	EarlySkips     int
+	Likes          int
+	Dislikes       int
+	LastPlayedAt   time.Time
+	LastFinishedAt time.Time
 }
 
 func statsOf(r db.TrackStats) Stats {
 	return Stats{
 		Shown: r.Shown, SkipEarly: r.SkipEarly, Completed: r.Completed,
-		Plays: r.Plays, Finishes: r.Finishes, EarlySkips: r.EarlySkips,
-		LastPlayedAt: parseTime(r.LastPlayedAt),
+		Plays: r.Plays, Finishes: r.Finishes, Partial: r.Partial, EarlySkips: r.EarlySkips,
+		Likes: r.Likes, Dislikes: r.Dislikes,
+		LastPlayedAt: parseTime(r.LastPlayedAt), LastFinishedAt: parseTime(r.LastFinishedAt),
 	}
 }
 
