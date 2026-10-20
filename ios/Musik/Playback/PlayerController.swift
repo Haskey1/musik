@@ -246,13 +246,15 @@ final class PlayerController: ObservableObject {
         }
         guard let track = current, sessionId != nil else { return }
         if duration > 0, listened / duration < 0.3 { noteEarlySkip(track) }
+        if playAheadLocally(after: track, event: "skip", reason: "skipped") { return }
         generation += 1
         let req = nextRequest()
         player.pause()
         Task {
             defer { self.finish(req) }
             do {
-                let res = try await self.postEvent("skip", track: track, reason: "skipped", retry: true)
+                let res = try await self.postEvent("skip", track: track, reason: "skipped",
+                                                   retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {
@@ -304,13 +306,15 @@ final class PlayerController: ObservableObject {
             offlineStep(+1)
             return
         }
+        if playAheadLocally(after: track, event: "track_end", reason: "completed") { return }
         generation += 1
         requestSeq += 1
         let req = requestSeq
         position = duration
         Task {
             do {
-                let res = try await self.postEvent("track_end", track: track, reason: "completed", retry: true)
+                let res = try await self.postEvent("track_end", track: track, reason: "completed",
+                                                   retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {
@@ -319,6 +323,38 @@ final class PlayerController: ObservableObject {
                 if Self.isNetwork(error) { self.enterOfflineFallback() } else { self.app?.show(error) }
             }
         }
+    }
+
+    /// How long to wait for the server before playing from the phone instead.
+    private static let eventTimeout: TimeInterval = 7
+
+    /// Next track already downloaded: start it right away and tell the server in the
+    /// background, so a slow network (EDGE) gives no pause between tracks. The server's
+    /// answer only refreshes the queue; if it never comes, the player goes offline
+    /// without interrupting the track that is already playing.
+    private func playAheadLocally(after track: Track, event: String, reason: String) -> Bool {
+        guard !fixed || playlist.count > 1,
+              let next = upcomingTracks(1).first, offline.playableURL(next.id) != nil else { return false }
+        requestSeq += 1
+        let req = requestSeq
+        load(next, autoplay: true, announce: false)
+        Task {
+            do {
+                let res = try await self.postEvent(event, track: track, reason: reason,
+                                                   retry: true, timeout: Self.eventTimeout)
+                guard req == self.requestSeq, self.current?.id == next.id else { return }
+                if let res {
+                    self.applyLists(res)
+                    // the server's copy carries this play's impression id
+                    if let fresh = res.next, fresh.id == next.id { self.current = fresh }
+                }
+                if let cur = self.current { self.sendStart(cur) }
+            } catch {
+                guard req == self.requestSeq, self.current?.id == next.id else { return }
+                if Self.isNetwork(error) { self.enterOfflineFallback(keepCurrent: true) }
+            }
+        }
+        return true
     }
 
     private func advance(with res: EventResult) {
@@ -436,7 +472,7 @@ final class PlayerController: ObservableObject {
 
     // MARK: - Loading
 
-    private func load(_ track: Track, autoplay: Bool) {
+    private func load(_ track: Track, autoplay: Bool, announce: Bool = true) {
         generation += 1
         let gen = generation
         current = track
@@ -461,6 +497,7 @@ final class PlayerController: ObservableObject {
             if !cookies.isEmpty { options[AVURLAssetHTTPCookiesKey] = cookies }
             item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
         }
+        Equalizer.attach(to: item)
         observe(item, gen: gen)
         player.replaceCurrentItem(with: item)
         schedulePrefetch()
@@ -472,7 +509,7 @@ final class PlayerController: ObservableObject {
         if autoplay {
             activateAudioSession()
             player.play()
-            sendStart(track)
+            if announce { sendStart(track) }
         }
     }
 
@@ -601,7 +638,7 @@ final class PlayerController: ObservableObject {
 
     @discardableResult
     private func postEvent(_ type: String, track: Track? = nil, reason: String? = nil,
-                           retry: Bool = false) async throws -> EventResult? {
+                           retry: Bool = false, timeout: TimeInterval? = nil) async throws -> EventResult? {
         guard !offlineMode, let sid = sessionId, let t = track ?? current else { return nil }
         let isCurrent = t.id == current?.id
         var body: [String: Any] = [
@@ -619,13 +656,16 @@ final class PlayerController: ObservableObject {
         if let reason { body["reason"] = reason }
 
         let data: Data
+        let started = Date()
         do {
-            data = try await api.send("POST", "/api/events", body: body)
-        } catch let e as APIError where retry && e.status == 0 {
-            // Same event_id: the server deduplicates retries.
+            data = try await api.send("POST", "/api/events", body: body, timeout: timeout)
+        } catch let e as APIError where retry && e.status == 0 && Date().timeIntervalSince(started) < 3 {
+            // A quick failure (dropped connection) is worth one more try — same event_id,
+            // the server deduplicates. A slow one is not: that is a bad network, and
+            // waiting longer only means silence.
             _ = e
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            data = try await api.send("POST", "/api/events", body: body)
+            try await Task.sleep(nanoseconds: 500_000_000)
+            data = try await api.send("POST", "/api/events", body: body, timeout: timeout)
         }
         return try api.decode(EventResult.self, from: data)
     }
@@ -646,7 +686,7 @@ final class PlayerController: ObservableObject {
 
     /// The server can't be reached mid-listening: continue with what is on the phone —
     /// first the upcoming tracks already prefetched, then saved tracks in random order.
-    private func enterOfflineFallback() {
+    private func enterOfflineFallback(keepCurrent: Bool = false) {
         guard !offlineMode else { return }
         var list = upcomingTracks(3).filter { offline.playableURL($0.id) != nil }
         var seen = Set(list.map(\.id))
@@ -657,11 +697,16 @@ final class PlayerController: ObservableObject {
             app?.show("Нет сети, а сохранённых треков пока нет")
             return
         }
-        startOffline(list, at: 0, fallback: true, name: "Без сети · сохранённое")
+        if keepCurrent, let cur = current, offline.playableURL(cur.id) != nil {
+            // the track playing is already on the phone: let it play on, go offline after it
+            startOffline([cur] + list, at: 0, fallback: true, name: "Без сети · сохранённое", reload: false)
+        } else {
+            startOffline(list, at: 0, fallback: true, name: "Без сети · сохранённое")
+        }
         app?.show("Нет сети — играю сохранённое")
     }
 
-    private func startOffline(_ list: [Track], at index: Int, fallback: Bool, name: String) {
+    private func startOffline(_ list: [Track], at index: Int, fallback: Bool, name: String, reload: Bool = true) {
         stallTask?.cancel()
         requestSeq += 1
         busy = false
@@ -673,7 +718,7 @@ final class PlayerController: ObservableObject {
         playlist = list
         queue = []
         listName = name
-        load(list[index], autoplay: true)
+        if reload { load(list[index], autoplay: true) }
         if fallback { startProbe() }
     }
 
@@ -732,7 +777,8 @@ final class PlayerController: ObservableObject {
         probeTask?.cancel()
         probeTask = Task {
             while !Task.isCancelled && self.offlineFallback && !self.serverReachable {
-                if self.networkUp, await self.api.ping() {
+                let started = Date()
+                if self.networkUp, await self.api.ping(), Date().timeIntervalSince(started) < 2.5 {
                     guard !Task.isCancelled, self.offlineFallback else { return }
                     self.serverReachable = true
                     self.app?.show("Связь есть — после этого трека включу онлайн-радио")
@@ -782,7 +828,7 @@ final class PlayerController: ObservableObject {
                 self.enterOfflineFallback()
                 return
             }
-            try? await Task.sleep(nanoseconds: 11_000_000_000)
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled, self.isBuffering, !self.offlineMode else { return }
             self.enterOfflineFallback()
         }

@@ -334,3 +334,43 @@ struct ActivityView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
 }
+
+
+// MARK: - Swipe to skip
+
+extension View {
+    /// Swipe left — next track, swipe right — back. The view follows the finger a little
+    /// and springs back; vertical drags (closing the player, scrolling) are left alone.
+    func swipeToSkip(threshold: CGFloat) -> some View { modifier(SwipeToSkip(threshold: threshold)) }
+}
+
+private struct SwipeToSkip: ViewModifier {
+    @EnvironmentObject var player: PlayerController
+    let threshold: CGFloat
+    @State private var dx: CGFloat = 0
+
+    func body(content: Content) -> some View {
+        content
+            .offset(x: dx)
+            .opacity(1 - min(abs(dx) / (threshold * 4), 0.35))
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 18)
+                    .onChanged { g in
+                        guard abs(g.translation.width) > abs(g.translation.height) * 1.3 else { return }
+                        dx = g.translation.width * 0.6
+                    }
+                    .onEnded { g in
+                        let horizontal = abs(g.translation.width) > abs(g.translation.height) * 1.3
+                        let w = g.predictedEndTranslation.width
+                        if horizontal && w < -threshold {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            player.skip()
+                        } else if horizontal && w > threshold {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            player.back()
+                        }
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { dx = 0 }
+                    }
+            )
+    }
+}

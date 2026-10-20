@@ -13,6 +13,8 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var pane: Pane = .queue
+    @State private var showEqualizer = false
+    @ObservedObject private var eq = Equalizer.shared
 
     var body: some View {
         ZStack {
@@ -26,6 +28,7 @@ struct NowPlayingView: View {
                             .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
                             .scaleEffect(player.isPlaying ? 1 : 0.94)
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.isPlaying)
+                            .swipeToSkip(threshold: 90)
                             .padding(.horizontal, 24)
                         titleBlock(track)
                         SeekBar()
@@ -40,6 +43,20 @@ struct NowPlayingView: View {
                         case .queue: upNext
                         case .lyrics: LyricsView(trackId: track.id)
                         }
+                        // quiet, at the very bottom — as in Yandex Music
+                        HStack {
+                            Spacer()
+                            Button { showEqualizer = true } label: {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.title3)
+                                    .foregroundStyle(eq.enabled ? Theme.accent : Theme.muted)
+                                    .frame(width: 64, height: 48)
+                                    .background(Theme.surface, in: Capsule())
+                            }
+                            .accessibilityLabel("Эквалайзер")
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
                     }
                     .padding(.bottom, 32)
                 }
@@ -52,6 +69,7 @@ struct NowPlayingView: View {
             }
         }
         .overlay(alignment: .top) { ToastView() }
+        .sheet(isPresented: $showEqualizer) { EqualizerView() }
     }
 
     // MARK: Parts
@@ -79,6 +97,9 @@ struct NowPlayingView: View {
             Spacer()
             if let track = player.current {
                 Menu {
+                    Button { showEqualizer = true } label: {
+                        Label("Эквалайзер", systemImage: "slider.horizontal.3")
+                    }
                     Button(role: .destructive) { player.hide(.track) } label: {
                         Label("Скрыть этот трек", systemImage: "eye.slash")
                     }
@@ -274,6 +295,7 @@ private struct QueueRow: View {
 }
 
 /// The seek bar: redraws with the clock without touching the rest of the screen.
+/// A tap anywhere on the line jumps there; dragging scrubs, the seek happens on release.
 private struct SeekBar: View {
     @EnvironmentObject var player: PlayerController
     @EnvironmentObject var clock: PlaybackClock
@@ -282,19 +304,38 @@ private struct SeekBar: View {
 
     var body: some View {
         let total = max(clock.duration, 1)
+        let value = scrubbing ? scrub : min(clock.position, total)
         VStack(spacing: 4) {
-            Slider(value: Binding(
-                get: { scrubbing ? scrub : min(clock.position, total) },
-                set: { scrub = $0 }
-            ), in: 0...total, onEditingChanged: { editing in
-                if editing {
-                    scrub = clock.position
-                    scrubbing = true
-                } else {
-                    player.seek(to: scrub)
-                    scrubbing = false
+            GeometryReader { geo in
+                let width = max(geo.size.width, 1)
+                let x = CGFloat(value / total) * width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.15)).frame(height: scrubbing ? 8 : 5)
+                    Capsule().fill(Theme.accent).frame(width: max(x, 0), height: scrubbing ? 8 : 5)
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: scrubbing ? 22 : 14, height: scrubbing ? 22 : 14)
+                        .shadow(color: .black.opacity(0.3), radius: 3)
+                        .offset(x: min(max(x - (scrubbing ? 11 : 7), -4), width - 10))
                 }
-            })
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { g in
+                            scrub = Double(min(max(g.location.x / width, 0), 1)) * total
+                            if !scrubbing { withAnimation(.easeOut(duration: 0.15)) { scrubbing = true } }
+                        }
+                        .onEnded { g in
+                            let target = Double(min(max(g.location.x / width, 0), 1)) * total
+                            scrub = target
+                            player.seek(to: target)
+                            withAnimation(.easeOut(duration: 0.2)) { scrubbing = false }
+                        }
+                )
+            }
+            .frame(height: 28)
+            .animation(.easeOut(duration: 0.15), value: scrubbing)
             HStack {
                 Text(formatTime(scrubbing ? scrub : clock.position))
                 Spacer()
