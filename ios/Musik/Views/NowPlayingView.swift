@@ -51,9 +51,9 @@ struct NowPlayingView: View {
                             Button { showEqualizer = true } label: {
                                 Image(systemName: "slider.horizontal.3")
                                     .font(.title3)
-                                    .foregroundStyle(eq.enabled ? Theme.accent : Theme.muted)
+                                    .foregroundStyle(eq.enabled ? Color.white : Color.white.opacity(0.7))
                                     .frame(width: 64, height: 48)
-                                    .background(Theme.surface, in: Capsule())
+                                    .background(Color.white.opacity(eq.enabled ? 0.28 : 0.12), in: Capsule())
                             }
                             .accessibilityLabel("Эквалайзер")
                         }
@@ -71,6 +71,7 @@ struct NowPlayingView: View {
                 }
             }
         }
+        .tint(.white)
         .overlay(alignment: .top) { ToastView() }
         .sheet(isPresented: $showEqualizer) { EqualizerView() }
         .interactiveDismissDisabled(swiping)
@@ -91,11 +92,11 @@ struct NowPlayingView: View {
                 if player.offlineMode {
                     Label("офлайн · с телефона", systemImage: "wifi.slash")
                         .font(.caption2)
-                        .foregroundStyle(Theme.accentBright)
+                        .foregroundStyle(Color.white)
                 } else {
                     Text(Labels.maturity(player.maturity))
                         .font(.caption2)
-                        .foregroundStyle(Theme.teal)
+                        .foregroundStyle(Color.white.opacity(0.8))
                 }
             }
             Spacer()
@@ -148,15 +149,15 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
             .font(.subheadline)
-            .foregroundStyle(Theme.muted)
+            .foregroundStyle(Color.white.opacity(0.7))
             .lineLimit(1)
             .padding(.horizontal, 8)
             if let source = Labels.source(track.source) {
                 Text(source)
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Theme.teal.opacity(0.25), in: Capsule())
-                    .foregroundStyle(Theme.teal)
+                    .background(Color.white.opacity(0.15), in: Capsule())
+                    .foregroundStyle(Color.white.opacity(0.8))
             }
         }
         .padding(.horizontal, 24)
@@ -171,9 +172,9 @@ struct NowPlayingView: View {
             Button { player.togglePlay() } label: {
                 ZStack {
                     Circle()
-                        .fill(LinearGradient(colors: [Theme.accentBright, Theme.accent],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .fill(Color.white)
                         .frame(width: 76, height: 76)
+                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
                     if player.isBuffering || player.busy {
                         ProgressView().tint(.black)
                     } else {
@@ -197,13 +198,13 @@ struct NowPlayingView: View {
                 Button { player.like() } label: {
                     Image(systemName: player.isFavorite ? "heart.fill" : "heart")
                 }
-                .buttonStyle(ChipButtonStyle(active: player.isFavorite))
+                .buttonStyle(GlassChipStyle(active: player.isFavorite))
                 .accessibilityLabel("Любимая")
 
                 Button { player.dislike() } label: {
                     Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                 }
-                .buttonStyle(ChipButtonStyle(active: player.disliked))
+                .buttonStyle(GlassChipStyle(active: player.disliked))
                 .disabled(player.disliked)
                 .accessibilityLabel("Дизлайк")
 
@@ -216,37 +217,37 @@ struct NowPlayingView: View {
                         Image(systemName: offline.isSaved(track.id) ? "arrow.down.circle.fill" : "arrow.down.circle")
                     }
                 }
-                .buttonStyle(ChipButtonStyle(active: offline.isSaved(track.id)))
+                .buttonStyle(GlassChipStyle(active: offline.isSaved(track.id)))
                 .accessibilityLabel("Сохранить на телефон")
 
                 Button { Task { await app.addLater(track.id) } } label: {
                     Label("Потом", systemImage: "clock")
                 }
-                .buttonStyle(ChipButtonStyle())
+                .buttonStyle(GlassChipStyle())
 
                 Button { player.playSimilarNow() } label: {
                     Label("Похожее", systemImage: "sparkles")
                 }
-                .buttonStyle(ChipButtonStyle())
+                .buttonStyle(GlassChipStyle())
             }
             HStack(spacing: 10) {
                 if let artist = track.artist.nonEmpty {
                     Button { Task { await app.toggleFavoriteArtist(artist) } } label: {
                         Label("артист", systemImage: app.favoriteArtists.contains(artist) ? "heart.fill" : "heart")
                     }
-                    .buttonStyle(ChipButtonStyle(active: app.favoriteArtists.contains(artist)))
+                    .buttonStyle(GlassChipStyle(active: app.favoriteArtists.contains(artist)))
                 }
                 if let album = track.album.nonEmpty {
                     let fav = app.favoriteAlbums.contains(albumKey(track.artist, album))
                     Button { Task { await app.toggleFavoriteAlbum(artist: track.artist, album: album) } } label: {
                         Label("альбом", systemImage: fav ? "heart.fill" : "heart")
                     }
-                    .buttonStyle(ChipButtonStyle(active: fav))
+                    .buttonStyle(GlassChipStyle(active: fav))
                 }
                 Button { player.startRadio(seed: track.id) } label: {
                     Label("Радио", systemImage: "dot.radiowaves.left.and.right")
                 }
-                .buttonStyle(ChipButtonStyle())
+                .buttonStyle(GlassChipStyle())
             }
         }
         .labelStyle(.titleAndIcon)
@@ -259,7 +260,7 @@ struct NowPlayingView: View {
             if player.fixed {
                 Text("В этом списке · \(player.playlist.count)")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
                 ForEach(Array(player.playlist.enumerated()), id: \.offset) { i, t in
                     TrackRow(track: t, index: i) {
                         player.jump(trackId: t.id, index: t.position ?? i)
@@ -268,7 +269,7 @@ struct NowPlayingView: View {
             } else {
                 Text("Дальше в радио · нажми — сразу она")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
                 ForEach(Array(player.queue.enumerated()), id: \.offset) { i, item in
                     QueueRow(item: item) {
                         player.jump(trackId: item.trackId, index: i)
@@ -297,16 +298,16 @@ private struct QueueRow: View {
                     HStack(spacing: 6) {
                         Text(item.artist ?? "").lineLimit(1)
                         if let why = Labels.why(item) {
-                            Text(why).italic().foregroundStyle(Theme.teal).lineLimit(1)
+                            Text(why).italic().foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
                         }
                     }
                     .font(.caption)
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
                 }
                 Spacer(minLength: 8)
                 Text(formatTime(item.duration))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
             }
             .contentShape(Rectangle())
         }
@@ -330,8 +331,8 @@ private struct SeekBar: View {
                 let width = max(geo.size.width, 1)
                 let x = CGFloat(value / total) * width
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.white.opacity(0.15)).frame(height: scrubbing ? 8 : 5)
-                    Capsule().fill(Theme.accent).frame(width: max(x, 0), height: scrubbing ? 8 : 5)
+                    Capsule().fill(Color.white.opacity(0.25)).frame(height: scrubbing ? 8 : 5)
+                    Capsule().fill(Color.white).frame(width: max(x, 0), height: scrubbing ? 8 : 5)
                     Circle()
                         .fill(Color.white)
                         .frame(width: scrubbing ? 22 : 14, height: scrubbing ? 22 : 14)
@@ -362,7 +363,7 @@ private struct SeekBar: View {
                 Text(formatTime(clock.duration))
             }
             .font(.caption.monospacedDigit())
-            .foregroundStyle(Theme.muted)
+            .foregroundStyle(Color.white.opacity(0.7))
         }
         .padding(.horizontal, 24)
     }
@@ -388,7 +389,7 @@ struct LyricsView: View {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     Text(line.text.isEmpty ? "♪" : line.text)
                         .font(.title3.weight(i == active ? .bold : .regular))
-                        .foregroundStyle(i == active ? Theme.accentBright : Theme.muted)
+                        .foregroundStyle(i == active ? Color.white : Color.white.opacity(0.7))
                         .onTapGesture { player.seek(to: line.time) }
                 }
             } else if let plain = lyrics?.plainLyrics.nonEmpty {
@@ -429,5 +430,22 @@ struct LyricsView: View {
             }
         }
         return out.sorted { $0.time < $1.time }
+    }
+}
+
+
+/// Chips over the cover-coloured background: frosted white instead of the app's dark
+/// surface and orange, so they read on any cover colour.
+struct GlassChipStyle: ButtonStyle {
+    var active = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(active ? 0.3 : 0.12), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(active ? 0.55 : 0.14)))
+            .foregroundStyle(Color.white)
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
