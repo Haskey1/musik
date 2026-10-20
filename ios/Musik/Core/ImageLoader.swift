@@ -45,14 +45,14 @@ final class ImageLoader: @unchecked Sendable {
 }
 
 /// Square cover for a track id. Sizes follow the server buckets: 96 / 256 / 640.
-/// With `artist`, the artist's photo is shown when the server has one, the track
-/// cover otherwise.
+/// With `photo` (an artist's photo, see ArtistAvatar), that picture is shown and the
+/// track cover only when it cannot be loaded.
 struct ArtworkView: View {
     let trackId: Int?
     var size: Int = 256
     var fallback: String = "♪"
     var cornerRadius: CGFloat = 10
-    var artist: String? = nil
+    var photo: URL? = nil
 
     @State private var image: UIImage?
 
@@ -65,7 +65,7 @@ struct ArtworkView: View {
             .overlay { content }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .task(id: LoadKey(trackId: trackId, photo: photoURL)) { await load() }
+            .task(id: LoadKey(trackId: trackId, photo: photo)) { await load() }
     }
 
     private struct LoadKey: Hashable {
@@ -73,38 +73,9 @@ struct ArtworkView: View {
         let photo: URL?
     }
 
-    /// Read without observing ArtistPhotos: a cover in a long list must not redraw
-    /// when the photo list changes. Artist views pass `artist` and observe it themselves.
-    @MainActor private var photoURL: URL? {
-        guard artist != nil else { return nil }
-        return ArtistPhotos.shared.url(for: artist, width: size, api: ImageLoader.shared.api)
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        ZStack {
-            if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
-                    .clipped()
-                    .transition(.opacity)
-            } else {
-                LinearGradient(colors: Theme.placeholder(for: trackId ?? 0),
-                               startPoint: .topLeading, endPoint: .bottomTrailing)
-                Text(fallback.prefix(1).uppercased())
-                    .font(.system(size: CGFloat(size) / 4, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .minimumScaleFactor(0.2)
-                    .padding(6)
-            }
-        }
-    }
-
     @MainActor private func load() async {
         image = nil
-        if let photo = photoURL {
+        if let photo {
             if let hit = ImageLoader.shared.cached(photo) {
                 image = hit
                 return

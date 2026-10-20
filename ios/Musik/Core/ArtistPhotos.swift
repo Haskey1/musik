@@ -67,7 +67,9 @@ struct ArtistAvatar: View {
     var cornerRadius: CGFloat = 60
 
     var body: some View {
-        ArtworkView(trackId: coverTrackId, size: size, fallback: artist,
-                    cornerRadius: cornerRadius, artist: artist)
+        // The URL is worked out here, in the view that observes the list, and handed
+        // down as a value: ArtworkView is redrawn (and reloads) only when it changes.
+        ArtworkView(trackId: coverTrackId, size: size, fallback: artist, cornerRadius: cornerRadius,
+                    photo: photos.url(for: artist, width: size, api: ImageLoader.shared.api))
     }
 }
