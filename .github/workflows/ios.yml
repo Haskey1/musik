@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel   # arm64 Macs are short on capacity right now
     timeout-minutes: 30
     defaults:
       run:
