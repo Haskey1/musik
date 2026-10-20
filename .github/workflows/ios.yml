@@ -45,6 +45,8 @@ jobs:
             MUSIK_SERVER_URL="${{ vars.MUSIK_SERVER_URL }}" \
             > build/xcodebuild.log 2>&1 || status=$?
           grep -E '(error:|BUILD SUCCEEDED|BUILD FAILED)' build/xcodebuild.log || true
+          # compile errors as annotations, readable without downloading the log
+          grep -E 'error:' build/xcodebuild.log | sed 's|.*/ios/||' | sort -u | head -10 | while IFS= read -r l; do echo "::error::$l"; done
           exit $status
       - name: Package .ipa
         run: |
