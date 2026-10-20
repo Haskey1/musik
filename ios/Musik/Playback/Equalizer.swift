@@ -15,8 +15,8 @@ final class Equalizer: ObservableObject {
     static let shared = Equalizer()
 
     /// Band centres, Hz — the same as Yandex Music's equalizer.
-    static let bands: [Double] = [60, 150, 400, 1_000, 2_400, 15_000]
-    static let range: ClosedRange<Double> = -12...12
+    nonisolated static let bands: [Double] = [60, 150, 400, 1_000, 2_400, 15_000]
+    nonisolated static let range: ClosedRange<Double> = -12...12
 
     struct Preset: Identifiable, Hashable {
         let id: String
@@ -98,7 +98,7 @@ final class Equalizer: ObservableObject {
     nonisolated private static func makeTap() -> MTAudioProcessingTap? {
         let context = TapContext()
         var callbacks = MTAudioProcessingTapCallbacks(
-            version: kMTAudioProcessingTapCallbacksVersion_0,
+            version: Int32(kMTAudioProcessingTapCallbacksVersion_0),
             clientInfo: UnsafeMutableRawPointer(Unmanaged.passRetained(context).toOpaque()),
             init: tapInit,
             finalize: tapFinalize,
@@ -108,7 +108,8 @@ final class Equalizer: ObservableObject {
         )
         var tap: MTAudioProcessingTap?
         let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
-                                                kMTAudioProcessingTapCreationFlag_PostEffects, &tap)
+                                                MTAudioProcessingTapCreationFlags(kMTAudioProcessingTapCreationFlag_PostEffects),
+                                                &tap)
         if status != noErr {
             Unmanaged<TapContext>.fromOpaque(callbacks.clientInfo!).release()
             return nil

@@ -44,17 +44,23 @@ struct MainView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
     @State private var showPlayer = false
+    @State private var selection = 0
+    @State private var paths: [NavigationPath] = Array(repeating: NavigationPath(), count: 4)
 
     var body: some View {
-        TabView {
-            tab { HomeView() }
+        TabView(selection: $selection) {
+            tab(0) { HomeView() }
                 .tabItem { Label("Главная", systemImage: "house.fill") }
-            tab { LibraryView() }
+                .tag(0)
+            tab(1) { LibraryView() }
                 .tabItem { Label("Библиотека", systemImage: "music.note.list") }
-            tab { DownloadsView() }
+                .tag(1)
+            tab(2) { DownloadsView() }
                 .tabItem { Label("Сохранённые", systemImage: "arrow.down.circle.fill") }
-            tab { ProfileView() }
+                .tag(2)
+            tab(3) { ProfileView() }
                 .tabItem { Label("Профиль", systemImage: "person.crop.circle") }
+                .tag(3)
         }
         .sheet(isPresented: $showPlayer) {
             NowPlayingView()
@@ -64,10 +70,19 @@ struct MainView: View {
                 .environmentObject(app.offline)
                 .presentationDragIndicator(.visible)
         }
+        .onChange(of: app.pendingRoute) { route in
+            guard let route else { return }
+            app.pendingRoute = nil
+            showPlayer = false
+            // the sheet slides away first, then the screen is pushed
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                paths[selection].append(route)
+            }
+        }
     }
 
-    private func tab<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        NavigationStack {
+    private func tab<Content: View>(_ index: Int, @ViewBuilder _ content: () -> Content) -> some View {
+        NavigationStack(path: $paths[index]) {
             content()
                 .withRoutes()
                 .miniPlayerSpace()

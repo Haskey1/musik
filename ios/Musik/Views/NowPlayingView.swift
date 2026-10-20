@@ -126,11 +126,27 @@ struct NowPlayingView: View {
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-            Text(track.subtitle)
-                .font(.subheadline)
-                .foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
+            // artist and album open their pages
+            HStack(spacing: 6) {
+                if let artist = track.artist.nonEmpty {
+                    Button { app.pendingRoute = .artist(artist) } label: {
+                        Text(artist).underline(false)
+                    }
+                }
+                if track.artist.nonEmpty != nil, track.album.nonEmpty != nil {
+                    Text("·")
+                }
+                if let album = track.album.nonEmpty {
+                    Button { app.pendingRoute = .album(artist: track.artist, album: album) } label: {
+                        Text(album)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(Theme.muted)
+            .lineLimit(1)
+            .padding(.horizontal, 8)
             if let source = Labels.source(track.source) {
                 Text(source)
                     .font(.caption2.weight(.semibold))

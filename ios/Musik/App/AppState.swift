@@ -14,6 +14,9 @@ final class AppState: ObservableObject {
     @Published var favoriteAlbums: Set<String> = []
     /// Bumped when shelves should reload (favorites or mixes changed).
     @Published var homeRevision = 0
+    /// A screen to open from outside the tabs (the player sheet): MainView closes the
+    /// player and pushes it onto the current tab.
+    @Published var pendingRoute: Route?
     /// Started without a connection to the server: only saved tracks are available.
     @Published var offlineLaunch = false
 
