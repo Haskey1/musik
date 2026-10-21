@@ -13,6 +13,7 @@ struct ProfileView: View {
     @State private var shareItem: ShareItem?
     @State private var mobileStream = Settings.shared.mobileStream
     @State private var prefetchNext = Settings.shared.prefetchNext
+    @State private var haptics = Settings.shared.haptics
     @State private var crossfadeEnabled = Settings.shared.crossfadeEnabled
     @State private var crossfadeSeconds = Double(Settings.shared.crossfadeSeconds)
     @State private var crossfadeKeepAlbums = Settings.shared.crossfadeKeepAlbums
@@ -158,6 +159,15 @@ struct ProfileView: View {
                 Text("Автоскачивание")
             } footer: {
                 Text("Первое: любимые треки сами скачиваются на телефон (и удаляются, когда снимаешь ♥). Второе: два следующих трека загружаются заранее, чтобы музыка не обрывалась при плохой связи. Выключи — приложение качает только то, что ты сохранил сам.")
+            }
+
+            Section {
+                Toggle("Тактильный отклик", isOn: $haptics)
+                    .onChange(of: haptics) { app.settings.haptics = $0 }
+            } header: {
+                Text("Вибрация")
+            } footer: {
+                Text("Лёгкая вибрация при лайке, снятии лайка и дизлайке. Если её нет совсем, проверь в настройках iPhone: «Звуки, тактильные сигналы» → «Системные тактильные сигналы».")
             }
 
             Section("Сервер") {

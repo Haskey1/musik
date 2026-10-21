@@ -61,6 +61,12 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "crossfadeKeepAlbums") }
     }
 
+    /// Vibration on the heart and other rating buttons.
+    var haptics: Bool {
+        get { defaults.object(forKey: "haptics") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "haptics") }
+    }
+
     /// Stable per-install id sent with playback events.
     var clientId: String {
         if let id = defaults.string(forKey: "clientId") { return id }

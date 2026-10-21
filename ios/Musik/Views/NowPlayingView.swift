@@ -221,7 +221,10 @@ struct NowPlayingView: View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 // a second tap takes the dislike back
-                Button { player.disliked ? player.undislike() : player.dislike() } label: {
+                Button {
+                    Haptics.tap()
+                    player.disliked ? player.undislike() : player.dislike()
+                } label: {
                     Image(systemName: player.disliked ? "heart.slash.fill" : "heart.slash")
                         .frame(maxWidth: .infinity)
                 }
@@ -456,7 +459,7 @@ private struct LikeChip: View {
         // read from AppState so an unlike (no player update follows it) redraws the heart
         let liked = player.current.map { app.favoriteTracks.contains($0.id) } ?? false
         Button {
-            if !liked { pulse() }
+            if liked { Haptics.tap() } else { pulse() }
             player.like()
         } label: {
             Image(systemName: liked ? "heart.fill" : "heart")
@@ -472,7 +475,7 @@ private struct LikeChip: View {
 
     /// Two quick beats, like a heart.
     private func pulse() {
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Haptics.heartbeat()
         let up = Animation.spring(response: 0.18, dampingFraction: 0.45)
         let down = Animation.spring(response: 0.28, dampingFraction: 0.6)
         withAnimation(up) { beat = true }
