@@ -220,7 +220,7 @@ struct TrackMenu: View {
             player.play(["track_id": track.id, "name": track.displayTitle])
         } label: { Label("Играть трек", systemImage: "play.fill") }
         if let url = app.shareURL(track: track) {
-            ShareLink(item: url) { Label("Поделиться", systemImage: "square.and.arrow.up") }
+            SwiftUI.ShareLink(item: url) { Label("Поделиться", systemImage: "square.and.arrow.up") }
         }
         Button {
             player.startRadio(seed: track.id)

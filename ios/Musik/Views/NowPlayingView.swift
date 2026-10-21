@@ -114,7 +114,7 @@ struct NowPlayingView: View {
             Spacer()
             if let track = player.current {
                 if let url = app.shareURL(track: track) {
-                    ShareLink(item: url) {
+                    SwiftUI.ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up").font(.title3)
                     }
                     .padding(.trailing, 14)

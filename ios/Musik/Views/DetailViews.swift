@@ -81,7 +81,7 @@ struct ArtistDetailView: View {
         .toolbar {
             if let url = app.shareURL(artist: artist) {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                    SwiftUI.ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
                 }
             }
         }
@@ -158,7 +158,7 @@ struct AlbumDetailView: View {
         .toolbar {
             if let url = app.shareURL(artist: artist ?? tracks.first?.artist, album: album) {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                    SwiftUI.ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
                 }
             }
         }
