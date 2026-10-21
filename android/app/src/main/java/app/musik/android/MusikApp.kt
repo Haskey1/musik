@@ -7,7 +7,10 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import app.musik.android.data.Api
 import app.musik.android.data.ArtistPhotos
+import app.musik.android.data.OfflineStore
 import app.musik.android.data.Settings
+import app.musik.android.playback.Equalizer
+import app.musik.android.playback.PlayerController
 
 /** Holds the app-wide singletons: settings, API client, state, player and offline store. */
 class MusikApp : Application(), ImageLoaderFactory {
@@ -17,6 +20,12 @@ class MusikApp : Application(), ImageLoaderFactory {
         private set
     lateinit var state: AppState
         private set
+    lateinit var offline: OfflineStore
+        private set
+    lateinit var player: PlayerController
+        private set
+    lateinit var equalizer: Equalizer
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -24,6 +33,15 @@ class MusikApp : Application(), ImageLoaderFactory {
         settings = Settings(this)
         api = Api(settings)
         state = AppState(settings, api, ArtistPhotos(settings))
+        equalizer = Equalizer(settings)
+        offline = OfflineStore(this, api, settings)
+        player = PlayerController(this, api, settings, offline, state)
+
+        offline.toast = { state.show(it) }
+        state.onSignedIn = { player.restore() }
+        state.onSignedOut = { clear -> player.stop(clear) }
+        state.onFavoritesLoaded = { offline.syncFavorites(it) }
+        state.onFavoriteChanged = { track, favorited -> offline.favoriteChanged(track, favorited) }
     }
 
     /** Covers and artist photos need the same auth as the API: Coil shares its OkHttp client. */

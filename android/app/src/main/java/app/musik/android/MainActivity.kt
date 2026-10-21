@@ -1,5 +1,9 @@
 package app.musik.android
 
+import android.Manifest
+import android.content.ComponentName
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -23,8 +27,14 @@ import app.musik.android.ui.ToastHost
 import app.musik.android.ui.displayStyle
 import app.musik.android.ui.screens.LoginScreen
 import app.musik.android.ui.screens.MainScreen
+import app.musik.android.playback.PlaybackService
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 
 class MainActivity : ComponentActivity() {
+    private var controller: ListenableFuture<MediaController>? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
@@ -37,6 +47,25 @@ class MainActivity : ComponentActivity() {
                 Root(app.state)
             }
         }
+        // Android 13+: the playback notification needs this permission.
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Binding a controller starts the playback service, which owns the media session.
+        val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
+        controller = MediaController.Builder(this, token).buildAsync()
+    }
+
+    override fun onStop() {
+        controller?.let { MediaController.releaseFuture(it) }
+        controller = null
+        super.onStop()
     }
 }
 
