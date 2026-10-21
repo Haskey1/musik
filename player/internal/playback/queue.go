@@ -503,7 +503,7 @@ func (e *Engine) persistTasteState(daypart string) {
 		})
 	}
 	negatives := e.TasteState.PersistentNegatives()
-	if len(negatives) > 0 {
+	{ // written even when empty, so an undone last dislike doesn't come back on restart
 		payload, _ := json.Marshal(negatives)
 		_ = e.Store.UpsertTasteState(db.TasteStateRow{
 			Key: "persistent_negative", NegativeSamples: len(negatives),
