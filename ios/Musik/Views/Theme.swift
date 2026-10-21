@@ -9,6 +9,8 @@ enum Theme {
     static let accentBright = Color(hex: 0xF29A55)
     static let teal = Color(hex: 0x3D8F7A)
     static let muted = Color(hex: 0xA89C94)
+    /// Liked heart: a warm scarlet that sits next to the orange accent.
+    static let love = Color(hex: 0xF0453A)
 
     static var backdrop: some View {
         ZStack {

@@ -215,13 +215,6 @@ struct NowPlayingView: View {
     private func actions(_ track: Track, onLyrics: @escaping () -> Void) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                Button { player.like() } label: {
-                    Image(systemName: player.isFavorite ? "heart.fill" : "heart")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassChipStyle(active: player.isFavorite))
-                .accessibilityLabel("Любимая")
-
                 // a second tap takes the dislike back
                 Button { player.disliked ? player.undislike() : player.dislike() } label: {
                     Image(systemName: player.disliked ? "heart.slash.fill" : "heart.slash")
@@ -244,6 +237,8 @@ struct NowPlayingView: View {
                 }
                 .buttonStyle(GlassChipStyle(active: offline.isSaved(track.id)))
                 .accessibilityLabel("Сохранить на телефон")
+
+                LikeChip()
             }
             HStack(spacing: 10) {
                 Button { player.playSimilarNow() } label: {
@@ -445,6 +440,40 @@ struct LyricsView: View {
     }
 }
 
+
+/// ♥ in the player: a fresh like makes the heart beat and fill with scarlet.
+private struct LikeChip: View {
+    @EnvironmentObject var player: PlayerController
+    @State private var beat = false
+
+    var body: some View {
+        let liked = player.isFavorite
+        Button {
+            if !liked { pulse() }
+            player.like()
+        } label: {
+            Image(systemName: liked ? "heart.fill" : "heart")
+                .foregroundStyle(liked ? Theme.love : Color.white)
+                .scaleEffect(beat ? 1.45 : 1)
+                .shadow(color: Theme.love.opacity(beat ? 0.8 : 0), radius: 8)
+                .frame(maxWidth: .infinity)
+                .animation(.easeInOut(duration: 0.2), value: liked)
+        }
+        .buttonStyle(GlassChipStyle(active: liked))
+        .accessibilityLabel(liked ? "Убрать из любимых" : "В любимые")
+    }
+
+    /// Two quick beats, like a heart.
+    private func pulse() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let up = Animation.spring(response: 0.18, dampingFraction: 0.45)
+        let down = Animation.spring(response: 0.28, dampingFraction: 0.6)
+        withAnimation(up) { beat = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { withAnimation(down) { beat = false } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.36) { withAnimation(up) { beat = true } }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) { withAnimation(down) { beat = false } }
+    }
+}
 
 /// Chips over the cover-coloured background: frosted white instead of the app's dark
 /// surface and orange, so they read on any cover colour.
