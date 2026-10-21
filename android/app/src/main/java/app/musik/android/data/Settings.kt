@@ -53,6 +53,26 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("haptics", true)
         set(value) = prefs.edit().putBoolean("haptics", value).apply()
 
+    /** Overlap the end of a track with the start of the next one. */
+    var crossfade: Boolean
+        get() = prefs.getBoolean("crossfade", true)
+        set(value) = prefs.edit().putBoolean("crossfade", value).apply()
+
+    /** Length of the overlap in seconds (1–12). */
+    var crossfadeSeconds: Int
+        get() = prefs.getInt("crossfadeSeconds", 6).coerceIn(1, 12)
+        set(value) = prefs.edit().putInt("crossfadeSeconds", value.coerceIn(1, 12)).apply()
+
+    /** No overlap between two tracks of the same album (they play back to back). */
+    var crossfadeSkipAlbums: Boolean
+        get() = prefs.getBoolean("crossfadeSkipAlbums", true)
+        set(value) = prefs.edit().putBoolean("crossfadeSkipAlbums", value).apply()
+
+    /** Download the next two tracks of the radio / list in advance. */
+    var prefetchNext: Boolean
+        get() = prefs.getBoolean("prefetchNext", true)
+        set(value) = prefs.edit().putBoolean("prefetchNext", value).apply()
+
     /** Stable per-install id sent with playback events. */
     val clientId: String
         get() {

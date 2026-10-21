@@ -35,6 +35,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -85,6 +87,10 @@ fun ProfileScreen() {
     var confirmLogout by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
     var haptics by remember { mutableStateOf(settings.haptics) }
+    var crossfade by remember { mutableStateOf(settings.crossfade) }
+    var crossfadeSeconds by remember { mutableStateOf(settings.crossfadeSeconds) }
+    var skipAlbums by remember { mutableStateOf(settings.crossfadeSkipAlbums) }
+    var prefetchNext by remember { mutableStateOf(settings.prefetchNext) }
     val nav = LocalNavigator.current
 
     LaunchedEffect(Unit) {
@@ -218,10 +224,6 @@ fun ProfileScreen() {
                 mobileStream = it
                 settings.mobileStream = it
             }
-            Toggle("Сохранять лайкнутые на телефон", offline.autoSaveFavorites) {
-                offline.updateAutoSave(it)
-                if (it) state.perform { state.refreshFavorites() }
-            }
             Row(
                 Modifier.fillMaxWidth().clickable { showEqualizer = true }.padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -230,6 +232,46 @@ fun ProfileScreen() {
                 Text(if (App.equalizer.enabled) "включён" else "выключен", color = MusikColors.muted)
                 Spacer(Modifier.size(8.dp))
                 Icon(Icons.Filled.Tune, null, tint = MusikColors.muted)
+            }
+        }
+
+        Section("Переходы между треками") {
+            Toggle("Кроссфейд", crossfade, "Конец трека плавно перетекает в начало следующего.") {
+                crossfade = it
+                settings.crossfade = it
+            }
+            if (crossfade) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Длительность", Modifier.weight(1f))
+                    Text("$crossfadeSeconds с", color = MusikColors.muted)
+                }
+                Slider(
+                    value = crossfadeSeconds.toFloat(),
+                    onValueChange = { crossfadeSeconds = it.roundToInt() },
+                    onValueChangeFinished = { settings.crossfadeSeconds = crossfadeSeconds },
+                    valueRange = 1f..12f, steps = 10,
+                    colors = SliderDefaults.colors(thumbColor = MusikColors.accent, activeTrackColor = MusikColors.accent),
+                )
+                Toggle("Альбомы без наложения", skipAlbums, "Треки одного альбома идут встык, без наложения.") {
+                    skipAlbums = it
+                    settings.crossfadeSkipAlbums = it
+                }
+            }
+        }
+
+        Section(
+            "Автоскачивание",
+            "Первое: любимые треки сами скачиваются на телефон (и удаляются, когда снимаешь ♥). " +
+                "Второе: два следующих трека загружаются заранее, чтобы музыка не обрывалась при плохой связи. " +
+                "Выключи — приложение качает только то, что ты сохранил сам.",
+        ) {
+            Toggle("Сохранять лайкнутые на телефон", offline.autoSaveFavorites) {
+                offline.updateAutoSave(it)
+                if (it) state.perform { state.refreshFavorites() }
+            }
+            Toggle("Подгружать следующие треки", prefetchNext) {
+                prefetchNext = it
+                settings.prefetchNext = it
             }
         }
 

@@ -5,6 +5,34 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.StartOffset
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -185,13 +213,8 @@ fun HomeScreen() {
                         Text("musik", style = displayStyle(40))
                         Text(Labels.maturity(player.maturity ?: model.maturity), color = MusikColors.teal)
                     }
+                    RadioCard()
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        PrimaryButton(onClick = { player.startRadio() }) {
-                            Icon(Icons.Filled.Radio, null, Modifier.size(18.dp)); Text("Радио")
-                        }
-                        ChipButton(onClick = { state.perform { shareRadio(context) } }) {
-                            Icon(Icons.Filled.Share, null, Modifier.size(18.dp)); Text("Поделиться")
-                        }
                         ChipButton(onClick = { scope.launch { refreshMixes(model) } }, enabled = !model.buildingMixes) {
                             if (model.buildingMixes) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
                             Text(if (model.buildingMixes) "Собираю…" else "Обновить миксы")
@@ -257,6 +280,72 @@ fun HomeScreen() {
         }
     }
         StatusBarScrim()
+    }
+}
+
+/**
+ * The big «Радио» card. Radio playing = there is a current track, it is not a fixed list and not offline;
+ * then a tap pauses / resumes it, otherwise it starts the radio.
+ */
+@Composable
+private fun RadioCard() {
+    val player = App.player
+    val radioPlaying = player.current != null && !player.fixed && !player.offlineMode
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.97f else 1f, spring(dampingRatio = 0.7f), label = "press")
+    val shape = RoundedCornerShape(24.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .shadow(14.dp, shape, ambientColor = MusikColors.accent, spotColor = MusikColors.accent)
+            .clip(shape)
+            .background(Brush.linearGradient(listOf(Color(0xFFF29A55), Color(0xFFE07A3A), Color(0xFF9C3F1E))))
+            .clickable(interaction, indication = null) {
+                if (radioPlaying) player.togglePlay() else player.startRadio()
+            }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(Modifier.size(60.dp).background(Color.Black.copy(alpha = 0.18f), CircleShape), contentAlignment = Alignment.Center) {
+            if (radioPlaying) EqualizerBars(animate = player.isPlaying)
+            else Icon(Icons.Filled.Radio, null, Modifier.size(28.dp), tint = Color.White)
+        }
+        Column(Modifier.weight(1f)) {
+            Text("Радио", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
+            val now = player.current?.takeIf { radioPlaying }
+            Text(
+                if (now != null) listOfNotNull(now.displayTitle, now.artist.nonEmpty).joinToString(" · ") else "Бесконечно и под твой вкус",
+                color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(Modifier.size(48.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(
+                if (radioPlaying && player.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                if (radioPlaying && player.isPlaying) "Пауза" else "Играть радио",
+                Modifier.size(28.dp), tint = MusikColors.accent,
+            )
+        }
+    }
+}
+
+/** Three bouncing bars, the «playing» mark inside the radio card. */
+@Composable
+private fun EqualizerBars(animate: Boolean) {
+    val transition = rememberInfiniteTransition(label = "bars")
+    val periods = listOf(520, 380, 450)
+    val heights = periods.mapIndexed { i, ms ->
+        val h by transition.animateFloat(
+            0.3f, 1f,
+            infiniteRepeatable(tween(ms, easing = LinearEasing), RepeatMode.Reverse, StartOffset(i * 120)),
+            label = "bar$i",
+        )
+        if (animate) h else 0.4f
+    }
+    Row(Modifier.height(26.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
+        heights.forEach { h -> Box(Modifier.width(5.dp).fillMaxHeight(h).background(Color.White, RoundedCornerShape(3.dp))) }
     }
 }
 

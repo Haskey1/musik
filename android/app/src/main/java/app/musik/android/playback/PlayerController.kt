@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
@@ -122,7 +123,7 @@ class PlayerController(
     /** Streams and covers go through the shared OkHttp client (Bearer / cookie auth). */
     val dataSourceFactory: DataSource.Factory = DefaultDataSource.Factory(context, OkHttpDataSource.Factory(api.http))
 
-    val exo: ExoPlayer = run {
+    private fun buildPlayer(main: Boolean): ExoPlayer {
         val sink: AudioSink = DefaultAudioSink.Builder(context)
             .setAudioProcessors(arrayOf<AudioProcessor>(EqualizerProcessor()))
             .build()
@@ -130,15 +131,24 @@ class PlayerController(
         val renderers = RenderersFactory { handler, _, audioListener, _, _ ->
             arrayOf<Renderer>(MediaCodecAudioRenderer(context, MediaCodecSelector.DEFAULT, handler, audioListener, sink))
         }
-        ExoPlayer.Builder(context, renderers)
+        return ExoPlayer.Builder(context, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
+            // only the main player takes audio focus and reacts to unplugged headphones
             .setAudioAttributes(
                 AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(),
-                true,
+                main,
             )
-            .setHandleAudioBecomingNoisy(true)
+            .setHandleAudioBecomingNoisy(main)
             .setWakeMode(C.WAKE_MODE_NETWORK)
             .build()
+    }
+
+    /** The player of the media session; carries the current track except during a crossfade. */
+    val exo: ExoPlayer = buildPlayer(main = true)
+
+    /** The second player: only the incoming track of a crossfade lives here, then it hands over to [exo]. */
+    private val fade: ExoPlayer by lazy {
+        buildPlayer(main = false).also { it.addListener(fadeListener) }
     }
 
     /** What the media session (notification, lock screen, headset) controls. */
@@ -154,6 +164,17 @@ class PlayerController(
     private var lastProgressAt = 0L
     private var failStreak = 0
     private var seeking = false
+
+    // Crossfade: the incoming track starts on [fade] while [exo] finishes the outgoing one,
+    // then [exo] takes the incoming track over from [fade] and the second player stops.
+    private class Fade(val item: MediaItem)
+    private var xf: Fade? = null
+    private var fadeJob: Job? = null
+    /** «Track ended» was sent early on purpose: the next [load] should overlap instead of cut. */
+    private var crossfadePending = false
+    private var crossfadeArmedAt = 0L
+    /** The player that carries the current track: [fade] while an overlap or its hand-over runs. */
+    private val live: ExoPlayer get() = if (xf != null) fade else exo
 
     // Offline playback: a local list played without server events.
     private var offlineList: List<Track> = emptyList()
@@ -178,10 +199,12 @@ class PlayerController(
                 when (state) {
                     Player.STATE_READY -> {
                         failStreak = 0
-                        val d = exo.duration
+                        val d = live.duration
                         if (d != C.TIME_UNSET && d > 0) duration = d / 1000.0
                     }
                     Player.STATE_ENDED -> {
+                        // the end was already reported early for a crossfade
+                        if (crossfadePending) return
                         val id = current?.id
                         if (id != null && exo.currentMediaItem?.mediaId == id.toString()) trackFinished()
                     }
@@ -336,9 +359,13 @@ class PlayerController(
         if (!startSent) sendStart(track)
     }
 
-    fun pause() = exo.pause()
+    fun pause() {
+        settleFade()
+        exo.pause()
+    }
 
     fun seek(seconds: Double) {
+        settleFade()
         if (exo.currentMediaItem == null) return
         val target = maxOf(0.0, if (duration > 0) minOf(seconds, duration - 0.25) else seconds)
         position = target
@@ -602,6 +629,10 @@ class PlayerController(
     // MARK: Loading
 
     private fun load(track: Track, autoplay: Boolean, announce: Boolean = true) {
+        // an early «track ended» for a crossfade: overlap if the outgoing track is still audibly playing
+        val overlap = crossfadePending && autoplay && canOverlap()
+        crossfadePending = false
+        if (!overlap) abortFade()
         current = track
         disliked = false
         startSent = false
@@ -629,9 +660,14 @@ class PlayerController(
                     .build(),
             )
             .build()
-        exo.setMediaItem(item)
-        exo.prepare()
-        exo.playWhenReady = autoplay
+        if (overlap) {
+            startFade(item)
+        } else {
+            exo.volume = 1f
+            exo.setMediaItem(item)
+            exo.prepare()
+            exo.playWhenReady = autoplay
+        }
         schedulePrefetch()
         if (autoplay && announce) sendStart(track)
     }
@@ -643,9 +679,10 @@ class PlayerController(
     }
 
     private fun updatePlaying() {
-        val state = exo.playbackState
-        val playing = exo.playWhenReady && (state == Player.STATE_READY || state == Player.STATE_BUFFERING)
-        val buffering = exo.playWhenReady && state == Player.STATE_BUFFERING
+        val p = live
+        val state = p.playbackState
+        val playing = p.playWhenReady && (state == Player.STATE_READY || state == Player.STATE_BUFFERING)
+        val buffering = p.playWhenReady && state == Player.STATE_BUFFERING
         if (buffering != isBuffering) {
             isBuffering = buffering
             if (buffering) watchStall() else stallJob?.cancel()
@@ -670,22 +707,187 @@ class PlayerController(
     }
 
     private fun tick() {
-        if (current == null || exo.currentMediaItem == null) return
-        val seconds = exo.currentPosition / 1000.0
+        val p = live
+        if (current == null || p.currentMediaItem == null) return
+        val seconds = p.currentPosition / 1000.0
         if (seconds > lastPos && seconds - lastPos < 5) listened += seconds - lastPos
         lastPos = seconds
         position = seconds
-        val d = exo.duration
+        val d = p.duration
         if (d != C.TIME_UNSET && d > 0 && kotlin.math.abs(d / 1000.0 - duration) > 0.5) duration = d / 1000.0
         val now = System.currentTimeMillis()
         if (isPlaying && now - lastProgressAt >= 4000) {
             lastProgressAt = now
             scope.launch { runCatching { postEvent("progress") } }
         }
+        maybeCrossfade()
+    }
+
+    // MARK: Crossfade
+
+    private val fadeListener = object : Player.Listener {
+        override fun onPlaybackStateChanged(state: Int) = updatePlaying()
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) = updatePlaying()
+        override fun onPlayerError(error: PlaybackException) {
+            if (xf == null) return
+            // the incoming track failed on the second player: play it from the start on the main one
+            abortFade()
+            current?.let { load(it, autoplay = true, announce = false) }
+        }
+    }
+
+    private fun sameAlbum(a: Track, b: Track): Boolean {
+        val al = a.album.nonEmpty?.trim() ?: return false
+        return al.equals(b.album.nonEmpty?.trim(), ignoreCase = true) &&
+            (a.artist ?: "").trim().equals((b.artist ?: "").trim(), ignoreCase = true)
+    }
+
+    /**
+     * Close to the end of a track: report it as finished (as the normal end would) and let the
+     * next [load] overlap. Not for the last track of a list, short tracks, seeks, pauses or
+     * while a request is running.
+     */
+    private fun maybeCrossfade() {
+        val now = SystemClock.uptimeMillis()
+        if (crossfadePending && now - crossfadeArmedAt > 10_000) crossfadePending = false
+        if (!settings.crossfade || crossfadePending || xf != null || busy || seeking || !isPlaying) return
+        val track = current ?: return
+        val len = settings.crossfadeSeconds.toDouble()
+        if (duration < len * 4) return
+        val remaining = duration - position
+        if (remaining > len + 0.5 || remaining < 0.4) return
+        val next = upcomingTracks(1).firstOrNull() ?: return
+        if (settings.crossfadeSkipAlbums && sameAlbum(track, next)) return
+        crossfadePending = true
+        crossfadeArmedAt = now
+        trackFinished()
+    }
+
+    private fun canOverlap(): Boolean {
+        if (xf != null || !exo.isPlaying) return false
+        val d = exo.duration
+        return d != C.TIME_UNSET && d - exo.currentPosition > 400
+    }
+
+    private fun startFade(item: MediaItem) {
+        val b = fade
+        val f = Fade(item)
+        xf = f
+        b.volume = 0f
+        b.setMediaItem(item)
+        b.prepare()
+        b.playWhenReady = true
+        fadeJob?.cancel()
+        fadeJob = scope.launch { runFade(f) }
+        updatePlaying()
+    }
+
+    private suspend fun runFade(f: Fade) {
+        val b = fade
+        // the outgoing track keeps its full volume until the incoming one really sounds (slow network: up to 4 s)
+        var waited = 0
+        while (xf === f && !(b.playbackState == Player.STATE_READY && b.isPlaying) && waited < 4000) {
+            delay(40)
+            waited += 40
+        }
+        if (xf !== f) return
+        // equal-power curves: out cos, in sin
+        val d = exo.duration
+        val tail = if (d == C.TIME_UNSET) 0L else (d - exo.currentPosition).coerceAtLeast(0L)
+        val lenMs = minOf(settings.crossfadeSeconds * 1000L, maxOf(300L, tail))
+        val t0 = SystemClock.uptimeMillis()
+        while (xf === f) {
+            val t = ((SystemClock.uptimeMillis() - t0).toFloat() / lenMs).coerceIn(0f, 1f)
+            exo.volume = kotlin.math.cos(t * Math.PI / 2).toFloat()
+            b.volume = kotlin.math.sin(t * Math.PI / 2).toFloat()
+            if (t >= 1f) break
+            delay(33)
+        }
+        if (xf !== f) return
+        handOver(f)
+    }
+
+    /** The main player (the one the media session knows) takes the incoming track over from [fade]. */
+    private suspend fun handOver(f: Fade) {
+        val b = fade
+        exo.volume = 0f
+        exo.setMediaItem(f.item, b.currentPosition)
+        exo.prepare()
+        exo.playWhenReady = false
+        if (!awaitReady(f, 8000)) return hardHandOver(f)
+        // start a touch ahead of the second player, so the two copies line up once the main one runs
+        exo.seekTo(b.currentPosition + 120)
+        delay(40)
+        if (!awaitReady(f, 3000)) return hardHandOver(f)
+        exo.playWhenReady = true
+        val t0 = SystemClock.uptimeMillis()
+        while (xf === f) {
+            val t = ((SystemClock.uptimeMillis() - t0).toFloat() / 250f).coerceIn(0f, 1f)
+            exo.volume = kotlin.math.sin(t * Math.PI / 2).toFloat()
+            b.volume = kotlin.math.cos(t * Math.PI / 2).toFloat()
+            if (t >= 1f) break
+            delay(25)
+        }
+        if (xf !== f) return
+        exo.volume = 1f
+        b.stop()
+        b.clearMediaItems()
+        xf = null
+        updatePlaying()
+    }
+
+    private suspend fun awaitReady(f: Fade, timeoutMs: Int): Boolean {
+        var waited = 0
+        while (xf === f && exo.playbackState != Player.STATE_READY && waited < timeoutMs) {
+            delay(30)
+            waited += 30
+        }
+        return xf === f && exo.playbackState == Player.STATE_READY
+    }
+
+    /** The main player was too slow to take over: cut straight to it at the second player's position. */
+    private fun hardHandOver(f: Fade) {
+        if (xf !== f) return
+        val pos = fade.currentPosition
+        fade.stop()
+        fade.clearMediaItems()
+        exo.volume = 1f
+        exo.seekTo(pos)
+        exo.playWhenReady = true
+        xf = null
+        updatePlaying()
+    }
+
+    /** Pause, seek or anything manual during an overlap: no more fading, the incoming track goes on alone. */
+    private fun settleFade() {
+        val f = xf ?: return
+        fadeJob?.cancel()
+        val pos = fade.currentPosition
+        fade.stop()
+        fade.clearMediaItems()
+        xf = null
+        exo.volume = 1f
+        exo.setMediaItem(f.item, pos)
+        exo.prepare()
+        exo.playWhenReady = true
+        updatePlaying()
+    }
+
+    /** A new track is loaded some other way (skip, jump, new list): drop the overlap, the outgoing track is replaced anyway. */
+    private fun abortFade() {
+        fadeJob?.cancel()
+        if (xf != null) {
+            fade.stop()
+            fade.clearMediaItems()
+            xf = null
+        }
+        exo.volume = 1f
     }
 
     fun stop(clearSession: Boolean) {
         requestSeq++
+        crossfadePending = false
+        abortFade()
         exo.stop()
         exo.clearMediaItems()
         current = null
@@ -758,10 +960,11 @@ class PlayerController(
      */
     private fun enterOfflineFallback(keepCurrent: Boolean = false) {
         if (offlineMode) return
-        val list = upcomingTracks(3).filter { offline.playableFile(it.id) != null }.toMutableList()
-        val seen = list.map { it.id }.toMutableSet()
+        // the prefetched upcoming tracks and the saved ones, no duplicates, no current track, all shuffled
+        val seen = mutableSetOf<Int>()
         current?.id?.let { seen.add(it) }
-        list += offline.savedTracks.map { it.track }.filter { it.id !in seen }.shuffled()
+        val prefetched = upcomingTracks(3).filter { offline.playableFile(it.id) != null }
+        val list = (prefetched + offline.savedTracks.map { it.track }).filter { seen.add(it.id) }.shuffled()
         if (list.isEmpty()) {
             exo.pause()
             app.show("Нет сети, а сохранённых треков пока нет")
@@ -880,7 +1083,7 @@ class PlayerController(
     /** Downloads the next two tracks a few seconds after a track starts. */
     private fun schedulePrefetch() {
         prefetchJob?.cancel()
-        if (offlineMode || !networkUp) return
+        if (offlineMode || !networkUp || !settings.prefetchNext) return
         prefetchJob = scope.launch {
             delay(5_000)
             if (!offlineMode) offline.prefetch(upcomingTracks(2))

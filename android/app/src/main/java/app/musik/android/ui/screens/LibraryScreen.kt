@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Search
@@ -43,9 +44,11 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.musik.android.data.AlbumItem
 import app.musik.android.data.ArtistItem
@@ -124,7 +127,7 @@ class LibraryModel {
     }
 }
 
-private val segments = listOf("Треки", "Артисты", "Альбомы", "Любимое")
+private val segments = listOf("Все", "Треки", "Артисты", "Альбомы", "Любимое")
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -188,7 +191,7 @@ fun LibraryScreen() {
                                     inactiveContainerColor = Color.Transparent,
                                 ),
                                 icon = {},
-                            ) { Text(title, maxLines = 1) }
+                            ) { Text(title, maxLines = 1, fontSize = 13.sp) }
                         }
                     }
                 }
@@ -197,9 +200,10 @@ fun LibraryScreen() {
                 item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MusikColors.accent) } }
             }
             when (segment) {
-                0 -> tracksSection(model.tracks.filter(::matchesTrack), q, model.loaded)
-                1 -> artistsSection(model.artists.filter { matches(it.artist) })
-                2 -> albumsSection(model.albums.filter { matches(it.album) || matches(it.artist) })
+                0 -> allSection(model, q, ::matches, ::matchesTrack) { segment = it }
+                1 -> tracksSection(model.tracks.filter(::matchesTrack), q, model.loaded)
+                2 -> artistsSection(model.artists.filter { matches(it.artist) })
+                3 -> albumsSection(model.albums.filter { matches(it.album) || matches(it.artist) })
                 else -> favoritesSection(model.favorites, ::matches, ::matchesTrack)
             }
         }
@@ -220,20 +224,81 @@ private fun LazyListScope.tracksSection(list: List<Track>, query: String, loaded
 }
 
 private fun LazyListScope.artistsSection(list: List<ArtistItem>) {
-    items(list) { a ->
-        val nav = LocalNavigator.current
-        Row(
-            Modifier.fillMaxWidth().clickable { nav.openArtist(a.artist) }.padding(vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            ArtistAvatar(a.artist, a.coverTrackId, Modifier.size(46.dp), 96, CircleShape)
-            Column(Modifier.weight(1f)) {
-                Text(a.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(tracksWord(a.tracks ?: 0), color = MusikColors.muted, style = MaterialTheme.typography.bodySmall)
-            }
-            if (a.artist in App.state.favoriteArtists) Icon(Icons.Filled.Favorite, null, Modifier.size(14.dp), tint = MusikColors.accent)
+    items(list) { a -> ArtistRow(a) }
+}
+
+@Composable
+private fun ArtistRow(a: ArtistItem) {
+    val nav = LocalNavigator.current
+    Row(
+        Modifier.fillMaxWidth().clickable { nav.openArtist(a.artist) }.padding(vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        ArtistAvatar(a.artist, a.coverTrackId, Modifier.size(46.dp), 96, CircleShape)
+        Column(Modifier.weight(1f)) {
+            Text(a.artist, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(tracksWord(a.tracks ?: 0), color = MusikColors.muted, style = MaterialTheme.typography.bodySmall)
         }
+        if (a.artist in App.state.favoriteArtists) Icon(Icons.Filled.Favorite, null, Modifier.size(14.dp), tint = MusikColors.accent)
+    }
+}
+
+/** «Все»: one search over artists, albums and tracks, a short preview of each with a way into its tab. */
+private fun LazyListScope.allSection(
+    model: LibraryModel,
+    query: String,
+    matches: (String?) -> Boolean,
+    matchesTrack: (Track) -> Boolean,
+    openSegment: (Int) -> Unit,
+) {
+    val searching = query.isNotEmpty()
+    val artists = model.artists.filter { matches(it.artist) }
+    val albums = model.albums.filter { matches(it.album) || matches(it.artist) }
+    val tracks = model.tracks.filter(matchesTrack)
+    val limit = if (searching) 8 else 5
+    val trackLimit = if (searching) 16 else 10
+
+    if (artists.isNotEmpty()) {
+        item { BigTitle("Артисты") }
+        items(artists.take(limit)) { ArtistRow(it) }
+        if (artists.size > limit) item { MoreButton("Все артисты · ${artists.size}") { openSegment(2) } }
+    }
+    if (albums.isNotEmpty()) {
+        item { BigTitle("Альбомы") }
+        items(albums.take(limit)) { AlbumRow(it) }
+        if (albums.size > limit) item { MoreButton("Все альбомы · ${albums.size}") { openSegment(3) } }
+    }
+    if (tracks.isNotEmpty()) {
+        item { BigTitle("Треки") }
+        val shown = tracks.take(trackLimit)
+        itemsIndexed(shown) { i, t ->
+            TrackRow(t) {
+                // the found tracks of this block, from the tapped one
+                val window = tracks.subList(i, minOf(tracks.size, i + 500))
+                App.player.play(jsonBody("track_ids" to window.map { it.id }, "name" to if (searching) "Поиск: $query" else "Библиотека"))
+            }
+        }
+        if (tracks.size > trackLimit) item { MoreButton("Все треки · ${tracks.size}") { openSegment(1) } }
+    }
+    if (model.loaded && artists.isEmpty() && albums.isEmpty() && tracks.isEmpty()) {
+        item { EmptyHint(if (searching) "Ничего не найдено" else "Библиотека пуста") }
+    }
+}
+
+@Composable
+private fun BigTitle(text: String) {
+    Text(text, Modifier.padding(top = 18.dp, bottom = 6.dp), style = displayStyle(24))
+}
+
+@Composable
+private fun MoreButton(text: String, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClick = onClick).padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text, Modifier.weight(1f), color = MusikColors.accentBright, fontWeight = FontWeight.SemiBold)
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MusikColors.accentBright)
     }
 }
 
