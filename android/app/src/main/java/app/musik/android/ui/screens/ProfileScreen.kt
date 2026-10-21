@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -56,6 +57,7 @@ import app.musik.android.data.RadioRule
 import app.musik.android.data.ShareLink
 import app.musik.android.playback.ArtistSkips
 import app.musik.android.ui.App
+import app.musik.android.ui.StatusBarScrim
 import app.musik.android.ui.ChipButton
 import app.musik.android.ui.EmptyHint
 import app.musik.android.ui.MusikColors
@@ -96,6 +98,7 @@ fun ProfileScreen() {
         state.show("Ссылка скопирована")
     }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
@@ -223,6 +226,9 @@ fun ProfileScreen() {
             TextButton(onClick = { confirmLogout = true }) { Text("Выйти", color = Color(0xFFFF6B6B)) }
         }
         Spacer(Modifier.height(24.dp))
+    }
+
+        StatusBarScrim()
     }
 
     if (confirmLogout) {

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import app.musik.android.data.formatBytes
 import app.musik.android.data.tracksWord
 import app.musik.android.ui.App
+import app.musik.android.ui.StatusBarScrim
 import app.musik.android.ui.ChipButton
 import app.musik.android.ui.EmptyHint
 import app.musik.android.ui.MusikColors
@@ -55,6 +56,7 @@ fun DownloadsScreen() {
 
     fun play(index: Int, shuffle: Boolean) = player.playOffline(items.map { it.track }, index, shuffle)
 
+    Box(Modifier.fillMaxSize()) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         item {
             Column(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -100,6 +102,9 @@ fun DownloadsScreen() {
                 }
             }
         }
+    }
+
+        StatusBarScrim()
     }
 
     if (confirmClear) {

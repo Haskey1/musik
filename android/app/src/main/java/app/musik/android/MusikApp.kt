@@ -11,6 +11,8 @@ import app.musik.android.data.OfflineStore
 import app.musik.android.data.Settings
 import app.musik.android.playback.Equalizer
 import app.musik.android.playback.PlayerController
+import app.musik.android.ui.screens.HomeModel
+import app.musik.android.ui.screens.LibraryModel
 
 /** Holds the app-wide singletons: settings, API client, state, player and offline store. */
 class MusikApp : Application(), ImageLoaderFactory {
@@ -39,7 +41,13 @@ class MusikApp : Application(), ImageLoaderFactory {
 
         offline.toast = { state.show(it) }
         state.onSignedIn = { player.restore() }
-        state.onSignedOut = { clear -> player.stop(clear) }
+        state.onSignedOut = { clear ->
+            player.stop(clear)
+            if (clear) {
+                HomeModel.reset()
+                LibraryModel.reset()
+            }
+        }
         state.onFavoritesLoaded = { offline.syncFavorites(it) }
         state.onFavoriteChanged = { track, favorited -> offline.favoriteChanged(track, favorited) }
     }

@@ -51,6 +51,7 @@ import app.musik.android.data.jsonBody
 import app.musik.android.data.nonEmpty
 import app.musik.android.ui.AlbumCard
 import app.musik.android.ui.App
+import app.musik.android.ui.StatusBarScrim
 import app.musik.android.ui.ArtistCard
 import app.musik.android.ui.Artwork
 import app.musik.android.ui.Card
@@ -119,7 +120,13 @@ class HomeModel {
     }
 
     companion object {
-        val shared = HomeModel()
+        var shared = HomeModel()
+            private set
+
+        /** Signed out: the next account starts from an empty screen. */
+        fun reset() {
+            shared = HomeModel()
+        }
     }
 }
 
@@ -154,6 +161,7 @@ fun HomeScreen() {
         player.playMix(mix.kind)
     }
 
+    Box(Modifier.fillMaxSize()) {
     PullToRefreshBox(
         isRefreshing = model.refreshing,
         onRefresh = {
@@ -247,6 +255,8 @@ fun HomeScreen() {
                 item { EmptyHint("Библиотека пуста или сервер ещё индексирует треки.") }
             }
         }
+    }
+        StatusBarScrim()
     }
 }
 

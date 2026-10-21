@@ -55,6 +55,7 @@ import app.musik.android.data.jsonBody
 import app.musik.android.data.nonEmpty
 import app.musik.android.data.tracksWord
 import app.musik.android.ui.App
+import app.musik.android.ui.StatusBarScrim
 import app.musik.android.ui.ArtistAvatar
 import app.musik.android.ui.Artwork
 import app.musik.android.ui.EmptyHint
@@ -92,7 +93,13 @@ class LibraryModel {
     }
 
     companion object {
-        val shared = LibraryModel()
+        var shared = LibraryModel()
+            private set
+
+        /** Signed out: the next account starts from an empty screen. */
+        fun reset() {
+            shared = LibraryModel()
+        }
 
         /** Each credited artist, by number of tracks; the cover is the first track with artwork. */
         fun groupArtists(tracks: List<Track>): List<ArtistItem> {
@@ -140,6 +147,7 @@ fun LibraryScreen() {
     fun matches(s: String?) = q.isEmpty() || (s ?: "").contains(q, ignoreCase = true)
     fun matchesTrack(t: Track) = matches(t.title) || matches(t.artist) || matches(t.album)
 
+    Box(Modifier.fillMaxSize()) {
     PullToRefreshBox(
         isRefreshing = model.refreshing,
         onRefresh = { scope.launch { model.refreshing = true; model.load(); model.refreshing = false } },
@@ -195,6 +203,8 @@ fun LibraryScreen() {
                 else -> favoritesSection(model.favorites, ::matches, ::matchesTrack)
             }
         }
+    }
+        StatusBarScrim()
     }
 }
 
