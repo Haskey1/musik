@@ -50,6 +50,7 @@ SELECT
     ELSE 0 END), 0),
   COALESCE(SUM(CASE
     WHEN action IN ('dislike','skip') THEN 1
+    WHEN action = 'undislike' THEN -1
     WHEN action = 'track_end' AND reason = 'skipped' AND COALESCE(listened_sec,0) < 0.3 * COALESCE(duration_sec,1) THEN 1
     ELSE 0 END), 0)
 FROM listening_history WHERE profile_id = ?`, s.ProfileID).Scan(&pos, &neg)

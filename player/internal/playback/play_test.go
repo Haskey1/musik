@@ -671,6 +671,17 @@ func TestUndislikeRestoresTasteAndHistory(t *testing.T) {
 	if _, rated := session.Rated[session.Current]; rated {
 		t.Fatal("undislike should clear the session rating")
 	}
+	var dislikes, kept, undos int
+	if err := engine.Store.DB.QueryRow(`SELECT COALESCE(SUM(dislikes),0) FROM track_stats WHERE track_id=?`,
+		session.Current).Scan(&dislikes); err != nil || dislikes != 0 {
+		t.Fatalf("dislike counter after undo = %d (%v), want 0", dislikes, err)
+	}
+	if err := engine.Store.DB.QueryRow(`SELECT
+  COALESCE(SUM(CASE WHEN action='dislike' THEN 1 ELSE 0 END),0),
+  COALESCE(SUM(CASE WHEN action='undislike' THEN 1 ELSE 0 END),0)
+FROM listening_history WHERE track_id=?`, session.Current).Scan(&kept, &undos); err != nil || kept != 1 || undos != 1 {
+		t.Fatalf("history after undo: %d dislike, %d undislike (%v); want the dislike kept and one undo", kept, undos, err)
+	}
 	again := engine.ApplyEvent(session, Event{Type: "undislike", EventID: "u2", TrackID: session.Current})
 	if !again.Ignored {
 		t.Fatalf("second undislike should be ignored: %+v", again)

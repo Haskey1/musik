@@ -442,32 +442,44 @@ WHERE profile_id=? AND impression_id=? AND action IN ('track_end','skip') AND ev
 	return closed > 0 || prior > 0, nil
 }
 
-// RevertDislike removes the newest dislike of a track from the history and takes it
-// back out of the track's counters. It reports whether there was a dislike to undo.
+// RevertDislike takes back the newest dislike of a track. listening_history is
+// append-only, so the dislike row stays and an 'undislike' event is recorded
+// after it; the track's dislike counter goes down by one. It reports whether
+// there was a dislike to undo (false when the newest of the two is already an undo).
 func (s *Store) RevertDislike(trackID int64) (bool, error) {
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return false, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var eventID string
+	var action, eventID string
+	var sessionID sql.NullString
 	err = tx.QueryRow(`
-SELECT event_id FROM listening_history
-WHERE profile_id=? AND track_id=? AND action='dislike'
-ORDER BY ts DESC LIMIT 1`, s.ProfileID, trackID).Scan(&eventID)
+SELECT action, COALESCE(event_id, CAST(id AS TEXT)), session_id FROM listening_history
+WHERE profile_id=? AND track_id=? AND action IN ('dislike','undislike')
+ORDER BY ts DESC, id DESC LIMIT 1`, s.ProfileID, trackID).Scan(&action, &eventID, &sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	if _, err = tx.Exec(`DELETE FROM listening_history WHERE profile_id=? AND event_id=?`,
-		s.ProfileID, eventID); err != nil {
+	if action != "dislike" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	nowText := now.Format(time.RFC3339Nano)
+	if _, err = tx.Exec(`
+INSERT INTO listening_history(
+  profile_id, track_id, ts, action, daypart, weekday, session_id, reason, event_id
+) VALUES (?,?,?,'undislike',?,?,?,'undo',?)`,
+		s.ProfileID, trackID, nowText, dayPart(now.Hour()), mondayZeroWeekday(now.Weekday()),
+		sessionID, "undo:"+eventID); err != nil {
 		return false, err
 	}
 	if _, err = tx.Exec(`
 UPDATE track_stats SET dislikes = CASE WHEN dislikes > 0 THEN dislikes-1 ELSE 0 END, updated_at=?
-WHERE profile_id=? AND track_id=?`, time.Now().UTC().Format(time.RFC3339Nano), s.ProfileID, trackID); err != nil {
+WHERE profile_id=? AND track_id=?`, nowText, s.ProfileID, trackID); err != nil {
 		return false, err
 	}
 	return true, tx.Commit()
