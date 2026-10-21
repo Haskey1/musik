@@ -16,7 +16,6 @@ struct HomeView: View {
     @State private var maturity: String?
     @State private var loaded = false
     @State private var refreshingMixes = false
-    @State private var shareItem: ShareItem?
 
     var body: some View {
         ScrollView {
@@ -43,10 +42,6 @@ struct HomeView: View {
                 .frame(height: 0)
                 .background(.ultraThinMaterial, ignoresSafeAreaEdges: .top)
         }
-        .sheet(item: $shareItem) { item in
-            ActivityView(items: [item.url])
-                .presentationDetents([.medium, .large])
-        }
     }
 
     // MARK: Header
@@ -59,22 +54,9 @@ struct HomeView: View {
                     .font(.footnote)
                     .foregroundStyle(Theme.teal)
             }
+            RadioCard()
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 10) {
-                    Button {
-                        player.startRadio()
-                    } label: {
-                        Label("Радио", systemImage: "dot.radiowaves.left.and.right")
-                    }
-                    .buttonStyle(PrimaryButtonStyle())
-
-                    Button {
-                        app.perform { try await shareRadio() }
-                    } label: {
-                        Label("Поделиться", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(ChipButtonStyle())
-
                     Button {
                         Task { await refreshMixes() }
                     } label: {
@@ -238,16 +220,6 @@ struct HomeView: View {
         app.favoriteAlbums = Set((fav.albums ?? []).map(\.id))
     }
 
-    private func shareRadio() async throws {
-        let created = try await app.api.createShare()
-        guard let raw = created.url, let url = URL(string: raw) else {
-            throw APIError(status: 0, code: "share", message: "Сервер не вернул ссылку")
-        }
-        UIPasteboard.general.string = raw
-        app.show("Ссылка на эфир скопирована")
-        shareItem = ShareItem(url: url)
-    }
-
     private func refreshMixes() async {
         refreshingMixes = true
         defer { refreshingMixes = false }
@@ -302,5 +274,91 @@ struct TipCard: View {
             .frame(width: 160, alignment: .leading)
         }
         .buttonStyle(.plain)
+    }
+}
+
+
+/// The radio on the home screen: a big warm card instead of a small button. Tapping it
+/// starts the radio, or pauses / resumes it when the radio is what is playing.
+private struct RadioCard: View {
+    @EnvironmentObject var player: PlayerController
+
+    private var radioOn: Bool { player.current != nil && !player.fixed && !player.offlineMode }
+
+    var body: some View {
+        Button {
+            if radioOn { player.togglePlay() } else { player.startRadio() }
+        } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle().fill(Color.black.opacity(0.18))
+                    if radioOn && player.isPlaying {
+                        SoundBars()
+                    } else {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                            .font(.system(size: 26, weight: .bold))
+                    }
+                }
+                .frame(width: 60, height: 60)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Радио").font(.display(28))
+                    Text(subtitle)
+                        .font(.subheadline.weight(.medium))
+                        .opacity(0.85)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.system(size: 20, weight: .bold))
+                    .foregroundStyle(Theme.accent)
+                    .frame(width: 48, height: 48)
+                    .background(Color.white, in: Circle())
+            }
+            .foregroundStyle(Color.white)
+            .padding(.horizontal, 18)
+            .padding(.vertical, 18)
+            .frame(maxWidth: .infinity)
+            .background(
+                LinearGradient(colors: [Theme.accentBright, Theme.accent, Color(hex: 0x9C3F1E)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
+            )
+            .shadow(color: Theme.accent.opacity(0.35), radius: 16, y: 8)
+        }
+        .buttonStyle(PressScaleStyle())
+        .accessibilityLabel(radioOn && player.isPlaying ? "Пауза радио" : "Включить радио")
+    }
+
+    private var subtitle: String {
+        if radioOn, let t = player.current {
+            return [t.displayTitle, t.artist.nonEmpty].compactMap { $0 }.joined(separator: " · ")
+        }
+        return "Бесконечно и под твой вкус"
+    }
+}
+
+/// Three bars bouncing while the radio plays.
+private struct SoundBars: View {
+    @State private var up = false
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: 4) {
+            ForEach(0..<3, id: \.self) { i in
+                Capsule()
+                    .frame(width: 5, height: up ? [22, 14, 26][i] : [10, 24, 12][i])
+                    .animation(.easeInOut(duration: [0.45, 0.35, 0.5][i]).repeatForever(autoreverses: true), value: up)
+            }
+        }
+        .frame(height: 28)
+        .onAppear { up = true }
+    }
+}
+
+private struct PressScaleStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.97 : 1)
+            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
     }
 }

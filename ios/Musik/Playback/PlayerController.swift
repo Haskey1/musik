@@ -856,13 +856,17 @@ final class PlayerController: ObservableObject {
     }
 
     /// The server can't be reached mid-listening: continue with what is on the phone —
-    /// first the upcoming tracks already prefetched, then saved tracks in random order.
+    /// saved tracks and the prefetched upcoming ones, shuffled.
     private func enterOfflineFallback(keepCurrent: Bool = false) {
         guard !offlineMode else { return }
-        var list = upcomingTracks(3).filter { offline.playableURL($0.id) != nil }
-        var seen = Set(list.map(\.id))
-        if let id = current?.id { seen.insert(id) }
-        list += offline.savedTracks.map(\.track).filter { !seen.contains($0.id) }.shuffled()
+        // saved tracks plus the radio's next ones already on the phone, all mixed up
+        var seen: Set<Int> = current.map { [$0.id] } ?? []
+        var list: [Track] = []
+        for t in upcomingTracks(3).filter({ offline.playableURL($0.id) != nil }) + offline.savedTracks.map(\.track)
+        where seen.insert(t.id).inserted {
+            list.append(t)
+        }
+        list.shuffle()
         guard !list.isEmpty else {
             player.pause()
             app?.show("Нет сети, а сохранённых треков пока нет")
