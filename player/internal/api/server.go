@@ -248,6 +248,7 @@ func (s *Server) Handler() http.Handler {
 			route.handler(server, w, r)
 		})
 	}
+	mux.HandleFunc("GET /open/", s.handleOpenLink)
 	mux.Handle("/", s.staticHandler())
 	var h http.Handler = mux
 	if s.Cfg.MultiUser {
