@@ -84,6 +84,7 @@ fun ProfileScreen() {
     var mobileStream by remember { mutableStateOf(settings.mobileStream) }
     var confirmLogout by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
+    var haptics by remember { mutableStateOf(settings.haptics) }
     val nav = LocalNavigator.current
 
     LaunchedEffect(Unit) {
@@ -229,6 +230,13 @@ fun ProfileScreen() {
                 Text(if (App.equalizer.enabled) "включён" else "выключен", color = MusikColors.muted)
                 Spacer(Modifier.size(8.dp))
                 Icon(Icons.Filled.Tune, null, tint = MusikColors.muted)
+            }
+        }
+
+        Section("Вибрация", "Лёгкая вибрация при лайке, снятии лайка и дизлайке.") {
+            Toggle("Тактильный отклик", haptics) {
+                haptics = it
+                settings.haptics = it
             }
         }
 

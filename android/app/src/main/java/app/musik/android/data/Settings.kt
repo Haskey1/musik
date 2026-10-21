@@ -48,6 +48,11 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("autoSaveFavorites", true)
         set(value) = prefs.edit().putBoolean("autoSaveFavorites", value).apply()
 
+    /** Short vibration on like / unlike / dislike. */
+    var haptics: Boolean
+        get() = prefs.getBoolean("haptics", true)
+        set(value) = prefs.edit().putBoolean("haptics", value).apply()
+
     /** Stable per-install id sent with playback events. */
     val clientId: String
         get() {

@@ -25,10 +25,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.automirrored.filled.Notes
+import androidx.compose.material.icons.filled.HeartBroken
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.HeartBroken
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.AutoAwesome
@@ -59,6 +66,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -83,6 +91,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.musik.android.data.Links
 import app.musik.android.data.Labels
 import app.musik.android.data.QueueItem
 import app.musik.android.data.Track
@@ -100,6 +109,7 @@ import app.musik.android.ui.MenuItem
 import app.musik.android.ui.MusikColors
 import app.musik.android.ui.TrackRow
 import app.musik.android.ui.withBrightness
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -138,25 +148,17 @@ fun NowPlayingScreen(onClose: () -> Unit) {
             TitleBlock(track)
             SeekBar()
             Transport()
-            Actions(track)
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
-                listOf("Дальше", "Текст").forEachIndexed { i, title ->
-                    SegmentedButton(
-                        selected = pane == i,
-                        onClick = { pane = i },
-                        shape = SegmentedButtonDefaults.itemShape(i, 2),
-                        colors = SegmentedButtonDefaults.colors(
-                            activeContainerColor = Color.White.copy(alpha = 0.25f),
-                            activeContentColor = Color.White,
-                            inactiveContainerColor = Color.Transparent,
-                            inactiveContentColor = Color.White.copy(alpha = 0.8f),
-                            activeBorderColor = Color.White.copy(alpha = 0.3f),
-                            inactiveBorderColor = Color.White.copy(alpha = 0.3f),
-                        ),
-                    ) { Text(title) }
+            Actions(track, lyricsOn = pane == 1, onLyrics = { pane = if (pane == 1) 0 else 1 })
+            val paneScroll = remember { BringIntoViewRequester() }
+            LaunchedEffect(pane) {
+                if (pane == 1) {
+                    delay(80)
+                    paneScroll.bringIntoView()
                 }
             }
-            if (pane == 0) UpNext() else LyricsPane(track.id)
+            Box(Modifier.bringIntoViewRequester(paneScroll)) {
+                if (pane == 0) UpNext() else LyricsPane(track.id)
+            }
             // quiet, at the very bottom — as in Yandex Music
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.End) {
                 val eqOn = App.equalizer.enabled
@@ -179,10 +181,14 @@ fun NowPlayingScreen(onClose: () -> Unit) {
 @Composable
 private fun TopBar(track: Track, onClose: () -> Unit, onEqualizer: () -> Unit) {
     val player = App.player
+    val context = LocalContext.current
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = onClose) { Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", Modifier.size(30.dp), tint = Color.White) }
-        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+    Box(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp)) {
+        // the title sits exactly in the middle of the screen whatever the width of the buttons around it
+        Column(
+            Modifier.align(Alignment.Center).padding(horizontal = 104.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Text(
                 player.listName ?: if (player.fixed) "Плейлист" else "Радио",
                 fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = Color.White,
@@ -193,16 +199,24 @@ private fun TopBar(track: Track, onClose: () -> Unit, onEqualizer: () -> Unit) {
                     Text("офлайн · с телефона", style = MaterialTheme.typography.labelSmall, color = Color.White)
                 }
             } else {
-                Text(Labels.maturity(player.maturity), style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.8f))
+                Text(Labels.maturity(player.maturity), style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.8f), maxLines = 1)
             }
         }
-        Box {
-            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Не предлагать", tint = Color.White) }
-            DropdownMenu(menu, { menu = false }, containerColor = MusikColors.surfaceHigh) {
-                MenuItem("Эквалайзер", { menu = false }) { onEqualizer() }
-                MenuItem("Скрыть этот трек", { menu = false }) { player.hide(PlayerController.HideTarget.Track) }
-                track.artist.nonEmpty?.let { a ->
-                    MenuItem("Скрыть артиста «$a»", { menu = false }) { player.hide(PlayerController.HideTarget.Artist) }
+        IconButton(onClick = onClose, Modifier.align(Alignment.CenterStart)) {
+            Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", Modifier.size(30.dp), tint = Color.White)
+        }
+        Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { shareText(context, Links.track(App.settings.baseUrl, track)) }) {
+                Icon(Icons.Filled.Share, "Поделиться", tint = Color.White)
+            }
+            Box {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Не предлагать", tint = Color.White) }
+                DropdownMenu(menu, { menu = false }, containerColor = MusikColors.surfaceHigh) {
+                    MenuItem("Эквалайзер", { menu = false }) { onEqualizer() }
+                    MenuItem("Скрыть этот трек", { menu = false }) { player.hide(PlayerController.HideTarget.Track) }
+                    track.artist.nonEmpty?.let { a ->
+                        MenuItem("Скрыть артиста «$a»", { menu = false }) { player.hide(PlayerController.HideTarget.Artist) }
+                    }
                 }
             }
         }
@@ -360,52 +374,60 @@ private fun Transport() {
     }
 }
 
+private val LikeRed = Color(0xFFF0453A)
+
 @Composable
-private fun Actions(track: Track) {
+private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
     val player = App.player
     val state = App.state
     val offline = App.offline
+    // the heart comes from the shared list of favourites, so it follows a like made anywhere
     val favorite = track.id in state.favoriteTracks
-    Column(Modifier.padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GlassChip(onClick = { player.like() }, active = favorite) {
-                Icon(if (favorite) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, "Любимая", Modifier.size(20.dp))
-            }
-            GlassChip(onClick = { player.dislike() }, active = player.disliked, enabled = !player.disliked) {
-                Icon(if (player.disliked) Icons.Filled.ThumbDown else Icons.Outlined.ThumbDown, "Дизлайк", Modifier.size(20.dp))
+    val heartColor by animateColorAsState(if (favorite) LikeRed else Color.White, tween(200), label = "heart")
+    val pulse = remember { Animatable(1f) }
+    var seenTick by remember { mutableIntStateOf(player.likeTick) }
+    LaunchedEffect(player.likeTick) {
+        if (player.likeTick == seenTick) return@LaunchedEffect
+        seenTick = player.likeTick
+        // heartbeat: 1 → 1.45 → 1 → 1.45 → 1 in about half a second
+        repeat(2) {
+            pulse.animateTo(1.45f, spring(dampingRatio = 0.45f, stiffness = 900f))
+            pulse.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 700f))
+        }
+    }
+    val cell = Modifier.weight(1f)
+    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassChip(onClick = { player.dislike() }, cell, active = player.disliked) {
+                Icon(if (player.disliked) Icons.Filled.HeartBroken else Icons.Outlined.HeartBroken, if (player.disliked) "Снять дизлайк" else "Дизлайк", Modifier.size(22.dp))
             }
             GlassChip(
                 onClick = { if (offline.isSaved(track.id)) offline.remove(track.id) else offline.save(track) },
-                active = offline.isSaved(track.id),
+                cell, active = offline.isSaved(track.id),
             ) {
                 when {
-                    track.id in offline.downloading -> CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
-                    offline.isSaved(track.id) -> Icon(Icons.Filled.CheckCircle, "Удалить с телефона", Modifier.size(20.dp))
-                    else -> Icon(Icons.Outlined.DownloadForOffline, "Сохранить на телефон", Modifier.size(20.dp))
+                    track.id in offline.downloading -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
+                    offline.isSaved(track.id) -> Icon(Icons.Filled.CheckCircle, "Удалить с телефона", Modifier.size(22.dp))
+                    else -> Icon(Icons.Outlined.DownloadForOffline, "Сохранить на телефон", Modifier.size(22.dp))
                 }
             }
-            GlassChip(onClick = { state.addLater(track.id) }) {
-                Icon(Icons.Filled.AccessTime, null, Modifier.size(18.dp)); Text("Потом")
-            }
-            GlassChip(onClick = { player.playSimilarNow() }) {
-                Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp)); Text("Похожее")
+            GlassChip(onClick = { player.like() }, cell, active = favorite) {
+                Icon(
+                    if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, "Любимая",
+                    Modifier.size(22.dp).graphicsLayer { scaleX = pulse.value; scaleY = pulse.value },
+                    tint = heartColor,
+                )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            track.artist.nonEmpty?.let { a ->
-                val on = a in state.favoriteArtists
-                GlassChip(onClick = { state.toggleFavoriteArtist(a) }, active = on) {
-                    Icon(if (on) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null, Modifier.size(16.dp)); Text("артист")
-                }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            GlassChip(onClick = { player.playSimilarNow() }, cell) {
+                Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp)); Text("Похожее", maxLines = 1)
             }
-            track.album.nonEmpty?.let { al ->
-                val on = albumKey(track.artist, al) in state.favoriteAlbums
-                GlassChip(onClick = { state.toggleFavoriteAlbum(track.artist, al) }, active = on) {
-                    Icon(if (on) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder, null, Modifier.size(16.dp)); Text("альбом")
-                }
+            GlassChip(onClick = onLyrics, cell, active = lyricsOn) {
+                Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(18.dp)); Text("Текст", maxLines = 1)
             }
-            GlassChip(onClick = { player.startRadio(seed = track.id) }) {
-                Icon(Icons.Filled.Radio, null, Modifier.size(18.dp)); Text("Радио")
+            GlassChip(onClick = { player.startRadio(seed = track.id) }, cell) {
+                Icon(Icons.Filled.Radio, null, Modifier.size(18.dp)); Text("Радио", maxLines = 1)
             }
         }
     }
@@ -422,7 +444,7 @@ private fun UpNext() {
                 TrackRow(t, index = i, onDark = true) { player.jump(t.id, t.position ?: i) }
             }
         } else {
-            Text("Дальше в радио · нажми — сразу она", color = Color.White.copy(alpha = 0.75f), style = header)
+            Text("Дальше в радио", color = Color.White.copy(alpha = 0.75f), style = header)
             player.queue.forEachIndexed { i, item -> QueueRow(item) { player.jump(item.trackId, i) } }
             if (player.queue.isEmpty()) EmptyHint("Очередь пополнится после следующего трека")
         }

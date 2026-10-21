@@ -36,6 +36,7 @@ import app.musik.android.AppState
 import app.musik.android.data.Api
 import app.musik.android.data.ApiError
 import app.musik.android.data.EventResult
+import app.musik.android.data.Haptics
 import app.musik.android.data.JsonFormat
 import app.musik.android.data.OfflineStore
 import app.musik.android.data.PlayPayload
@@ -91,6 +92,9 @@ class PlayerController(
     var isPlaying by mutableStateOf(false)
         private set
     var isBuffering by mutableStateOf(false)
+        private set
+    /** Bumped on every fresh like so the heart in the player can pulse. */
+    var likeTick by mutableStateOf(0)
         private set
     var disliked by mutableStateOf(false)
         private set
@@ -493,8 +497,12 @@ class PlayerController(
         scope.launch {
             val liked = app.toggleFavoriteTrack(track)
             if (liked == true) {
+                likeTick++
+                Haptics.like(context, settings)
                 ArtistSkips.reset(settings, track.artist)
                 runCatching { postEvent("like", track) }.getOrNull()?.let { applyLists(it) }
+            } else if (liked == false) {
+                Haptics.tick(context, settings)
             }
         }
     }
@@ -515,16 +523,33 @@ class PlayerController(
         }
     }
 
+    /** Dislike; pressing it again takes the dislike back (`undislike`). */
     fun dislike() {
         val track = current ?: return
+        val undo = disliked
         scope.launch {
             try {
-                val res = postEvent("dislike", track) ?: return@launch
+                val res = postEvent(if (undo) "undislike" else "dislike", track) ?: return@launch
                 applyLists(res)
-                if (track.id == current?.id) disliked = true
-                app.show(if (res.ignored == true) "Уже дизлайк" else "Дизлайк — меньше такого")
+                if (track.id == current?.id) disliked = !undo
+                Haptics.tick(context, settings)
+                app.show(
+                    when {
+                        undo -> "Дизлайк снят"
+                        res.ignored == true -> "Уже дизлайк"
+                        else -> "Дизлайк — меньше такого"
+                    },
+                )
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: ApiError) {
+                if (undo && e.code == "unknown_event") {
+                    // An older server doesn't know «undislike»: reset the button anyway.
+                    if (track.id == current?.id) disliked = false
+                    app.show("Дизлайк снят в приложении — обнови сервер, чтобы он забыл его")
+                } else {
+                    app.show(e)
+                }
             } catch (e: Exception) {
                 app.show(e)
             }
