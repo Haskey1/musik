@@ -13,6 +13,9 @@ struct ProfileView: View {
     @State private var shareItem: ShareItem?
     @State private var mobileStream = Settings.shared.mobileStream
     @State private var prefetchNext = Settings.shared.prefetchNext
+    @State private var crossfadeEnabled = Settings.shared.crossfadeEnabled
+    @State private var crossfadeSeconds = Double(Settings.shared.crossfadeSeconds)
+    @State private var crossfadeKeepAlbums = Settings.shared.crossfadeKeepAlbums
     @State private var confirmLogout = false
 
     var body: some View {
@@ -120,6 +123,28 @@ struct ProfileView: View {
                 Text("Сервер отдаёт перекодированную версию, если она готова, иначе — оригинал. Выключи, чтобы всегда слушать оригинал (FLAC и т. п.).")
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
+            }
+
+            Section {
+                Toggle("Кроссфейд", isOn: $crossfadeEnabled)
+                    .onChange(of: crossfadeEnabled) { app.settings.crossfadeEnabled = $0 }
+                if crossfadeEnabled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Длительность")
+                            Spacer()
+                            Text("\(Int(crossfadeSeconds)) с").foregroundStyle(Theme.muted).monospacedDigit()
+                        }
+                        Slider(value: $crossfadeSeconds, in: 1...12, step: 1)
+                            .onChange(of: crossfadeSeconds) { app.settings.crossfadeSeconds = Int($0) }
+                    }
+                    Toggle("Альбомы без наложения", isOn: $crossfadeKeepAlbums)
+                        .onChange(of: crossfadeKeepAlbums) { app.settings.crossfadeKeepAlbums = $0 }
+                }
+            } header: {
+                Text("Переходы между треками")
+            } footer: {
+                Text("Конец трека плавно перетекает в начало следующего. «Альбомы без наложения» оставляет переходы внутри одного альбома без паузы и без наложения. Вручную переключённый трек сменяется сразу.")
             }
 
             Section {

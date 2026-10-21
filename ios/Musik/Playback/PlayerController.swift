@@ -39,7 +39,10 @@ final class PlayerController: ObservableObject {
     private let api: APIClient
     private let settings: Settings
     private let offline: OfflineStore
-    private let player = AVPlayer()
+    /// The active player. During a crossfade `spare` holds the outgoing track; afterwards
+    /// the two swap roles, so the next crossfade starts the other way round.
+    private var player = AVPlayer()
+    private var spare = AVPlayer()
 
     private(set) var sessionId: String?
     /// Bumped whenever the loaded item or pending advance changes; stale item callbacks compare against it.
@@ -55,6 +58,11 @@ final class PlayerController: ObservableObject {
     private var seeking = false
 
     private var timeObserver: Any?
+    private weak var timeObserverOwner: AVPlayer?
+    /// A crossfade into the next track was started; the next `load` consumes it.
+    private var crossfadeArmed = false
+    private(set) var crossfading = false
+    private var fadeTask: Task<Void, Never>?
     private var statusObservation: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
     private var itemNotifications: [NSObjectProtocol] = []
@@ -81,6 +89,7 @@ final class PlayerController: ObservableObject {
         self.settings = settings
         self.offline = offline
         player.automaticallyWaitsToMinimizeStalling = true
+        spare.automaticallyWaitsToMinimizeStalling = true
         configureAudioSession()
         configureRemoteCommands()
         observePlayer()
@@ -163,6 +172,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func start(_ request: @escaping () async throws -> PlayPayload) {
+        crossfadeArmed = false
         generation += 1
         let req = nextRequest()
         Task {
@@ -227,6 +237,7 @@ final class PlayerController: ObservableObject {
 
     func togglePlay() {
         if isPlaying {
+            stopFadeNow()
             player.pause()
         } else {
             resume()
@@ -244,10 +255,14 @@ final class PlayerController: ObservableObject {
         if !startSent { sendStart(track) }
     }
 
-    func pause() { player.pause() }
+    func pause() {
+        stopFadeNow()
+        player.pause()
+    }
 
     func seek(to seconds: Double) {
         guard player.currentItem != nil else { return }
+        stopFadeNow()
         let target = max(0, duration > 0 ? min(seconds, duration - 0.25) : seconds)
         seeking = true
         position = target
@@ -264,6 +279,8 @@ final class PlayerController: ObservableObject {
     }
 
     func skip() {
+        crossfadeArmed = false
+        stopFadeNow()
         if offlineMode {
             offlineStep(+1)
             return
@@ -519,6 +536,9 @@ final class PlayerController: ObservableObject {
     // MARK: - Loading
 
     private func load(_ track: Track, autoplay: Bool, announce: Bool = true) {
+        let fadeLength = armedFadeLength(autoplay: autoplay)
+        crossfadeArmed = false
+        if fadeLength == nil { stopFadeNow() }
         generation += 1
         let gen = generation
         current = track
@@ -545,7 +565,11 @@ final class PlayerController: ObservableObject {
         }
         Equalizer.attach(to: item)
         observe(item, gen: gen)
-        player.replaceCurrentItem(with: item)
+        if let fadeLength {
+            startCrossfade(into: item, length: fadeLength)
+        } else {
+            player.replaceCurrentItem(with: item)
+        }
         schedulePrefetch()
 
         nowPlayingArtwork = nil
@@ -614,11 +638,25 @@ final class PlayerController: ObservableObject {
     }
 
     private func observePlayer() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+        attachObservers(to: player)
+        interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
+            guard let info = note.userInfo,
+                  let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .ended,
+                  let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt,
+                  AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume)
+            else { return }
+            Task { @MainActor in self?.resume() }
+        }
+    }
+
+    private func attachObservers(to p: AVPlayer) {
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             let seconds = time.seconds
             Task { @MainActor in self?.tick(seconds) }
         }
-        statusObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+        timeObserverOwner = p
+        statusObservation = p.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
             let status = player.timeControlStatus
             Task { @MainActor in
                 guard let self else { return }
@@ -631,15 +669,97 @@ final class PlayerController: ObservableObject {
                 }
             }
         }
-        interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
-            guard let info = note.userInfo,
-                  let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-                  AVAudioSession.InterruptionType(rawValue: raw) == .ended,
-                  let optRaw = info[AVAudioSessionInterruptionOptionKey] as? UInt,
-                  AVAudioSession.InterruptionOptions(rawValue: optRaw).contains(.shouldResume)
-            else { return }
-            Task { @MainActor in self?.resume() }
+    }
+
+    private func detachObservers() {
+        if let t = timeObserver { timeObserverOwner?.removeTimeObserver(t) }
+        timeObserver = nil
+        timeObserverOwner = nil
+        statusObservation = nil
+    }
+
+    // MARK: - Crossfade
+
+    /// Near the end of a track, start the transition early: the usual «track finished»
+    /// flow runs now, and `load` turns its start of the next track into a crossfade.
+    private func maybeStartCrossfade() {
+        guard settings.crossfadeEnabled, settings.crossfadeSeconds > 0,
+              !crossfadeArmed, !crossfading, !busy, !seeking, isPlaying,
+              let track = current, duration > 0 else { return }
+        let fade = Double(settings.crossfadeSeconds)
+        let left = duration - position
+        // a short track (or a short tail) is left alone; the fade is at most a quarter of it
+        guard duration >= fade * 4, left <= fade + 0.5, left > 1 else { return }
+        guard let next = upcomingTracks(1).first else { return }
+        if settings.crossfadeKeepAlbums, Self.sameAlbum(track, next) { return }
+        crossfadeArmed = true
+        trackFinished(gen: generation)
+    }
+
+    private static func sameAlbum(_ a: Track, _ b: Track) -> Bool {
+        guard let x = a.album.nonEmpty, let y = b.album.nonEmpty else { return false }
+        return x.caseInsensitiveCompare(y) == .orderedSame
+            && (a.artist.nonEmpty ?? "").caseInsensitiveCompare(b.artist.nonEmpty ?? "") == .orderedSame
+    }
+
+    /// Length of the overlap if the next track should fade in over the one still playing.
+    private func armedFadeLength(autoplay: Bool) -> Double? {
+        guard crossfadeArmed, autoplay, !crossfading, isPlaying, let item = player.currentItem else { return nil }
+        let total = item.duration.seconds
+        let at = player.currentTime().seconds
+        guard total.isFinite, at.isFinite, total - at > 0.8 else { return nil }
+        return min(Double(settings.crossfadeSeconds), total - at)
+    }
+
+    /// The new item starts silent on the spare player, which then becomes the active one;
+    /// the old player keeps playing its tail and fades out.
+    private func startCrossfade(into item: AVPlayerItem, length: Double) {
+        let outgoing = player
+        let incoming = spare
+        incoming.volume = 0
+        incoming.replaceCurrentItem(with: item)
+        incoming.play()
+        detachObservers()
+        spare = outgoing
+        player = incoming
+        attachObservers(to: incoming)
+        crossfading = true
+        fadeTask = Task { @MainActor [weak self] in
+            await self?.runFade(out: outgoing, into: incoming, length: length)
         }
+    }
+
+    /// Equal-power curves. The outgoing track keeps full volume until the new one is
+    /// really playing, so a slow stream gives a plain cut, not silence.
+    private func runFade(out: AVPlayer, into incoming: AVPlayer, length: Double) async {
+        var waited = 0.0
+        while incoming.timeControlStatus != .playing, waited < 4 {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            waited += 0.05
+            if Task.isCancelled { return }
+        }
+        let started = Date()
+        while !Task.isCancelled {
+            let t = min(1, Date().timeIntervalSince(started) / max(length, 0.1))
+            out.volume = Float(cos(t * .pi / 2))
+            incoming.volume = Float(sin(t * .pi / 2))
+            if t >= 1 { break }
+            try? await Task.sleep(nanoseconds: 33_000_000)
+        }
+        if !Task.isCancelled { stopFadeNow() }
+    }
+
+    /// Ends a crossfade at once (pause, seek, skip, a new track): the outgoing track is
+    /// dropped and the active one goes back to full volume.
+    private func stopFadeNow() {
+        fadeTask?.cancel()
+        fadeTask = nil
+        guard crossfading else { return }
+        crossfading = false
+        spare.pause()
+        spare.replaceCurrentItem(with: nil)
+        spare.volume = 1
+        player.volume = 1
     }
 
     private func tick(_ seconds: Double) {
@@ -655,9 +775,12 @@ final class PlayerController: ObservableObject {
             lastProgressAt = Date()
             Task { _ = try? await self.postEvent("progress") }
         }
+        maybeStartCrossfade()
     }
 
     func stop(clearSession: Bool) {
+        crossfadeArmed = false
+        stopFadeNow()
         generation += 1
         requestSeq += 1
         player.pause()

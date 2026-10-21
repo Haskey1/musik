@@ -44,6 +44,23 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "prefetchNext") }
     }
 
+    /// Crossfade between tracks: on/off, length in seconds, and whether tracks of one
+    /// album are left gapless.
+    var crossfadeEnabled: Bool {
+        get { defaults.object(forKey: "crossfadeEnabled") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "crossfadeEnabled") }
+    }
+
+    var crossfadeSeconds: Int {
+        get { min(12, max(1, defaults.object(forKey: "crossfadeSeconds") as? Int ?? 6)) }
+        set { defaults.set(min(12, max(1, newValue)), forKey: "crossfadeSeconds") }
+    }
+
+    var crossfadeKeepAlbums: Bool {
+        get { defaults.object(forKey: "crossfadeKeepAlbums") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "crossfadeKeepAlbums") }
+    }
+
     /// Stable per-install id sent with playback events.
     var clientId: String {
         if let id = defaults.string(forKey: "clientId") { return id }
