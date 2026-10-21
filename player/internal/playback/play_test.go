@@ -647,7 +647,7 @@ func TestNewSessionIDUniqueWithinOneClockTick(t *testing.T) {
 func TestUndislikeRestoresTasteAndHistory(t *testing.T) {
 	engine := testEngine(t)
 	insertPlaybackTracks(t, engine)
-	session := engine.StartRadio(nil)
+	session := engine.Start("radio", nil, nil)
 	session.Lock()
 	defer session.Unlock()
 	engine.ApplyEvent(session, Event{
