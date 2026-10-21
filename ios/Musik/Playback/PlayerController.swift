@@ -102,6 +102,30 @@ final class PlayerController: ObservableObject {
         start { try await self.api.post("/api/play", body) }
     }
 
+    /// Plays an artist or an album as a fixed list of ids, like the web UI does.
+    /// `/api/play` with `artist` only matches the exact artist field, so tracks where the
+    /// artist is a co-author («X feat. Y») — which `/api/library` does list — weren't found.
+    /// `tracks` is the list the page already shows; without it the library is asked first.
+    func playCatalog(artist: String?, album: String? = nil, tracks: [Track] = [],
+                     startTrackId: Int? = nil) {
+        let artistName = artist?.trimmingCharacters(in: .whitespaces) ?? ""
+        let albumName = album?.trimmingCharacters(in: .whitespaces) ?? ""
+        let name = [artistName, albumName].filter { !$0.isEmpty }.joined(separator: " — ")
+        start {
+            var list = tracks
+            if list.isEmpty {
+                list = try await self.api.library(artist: artistName.isEmpty ? nil : artistName,
+                                                  album: albumName.isEmpty ? nil : albumName)
+            }
+            guard !list.isEmpty else {
+                throw APIError(status: 0, code: "empty", message: "Треков не нашлось")
+            }
+            var body: [String: Any] = ["track_ids": list.map(\.id), "name": name.isEmpty ? "Плейлист" : name]
+            if let startTrackId { body["start_track_id"] = startTrackId }
+            return try await self.api.post("/api/play", body)
+        }
+    }
+
     func playMix(_ kind: String, startTrackId: Int? = nil) {
         let escaped = kind.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? kind
         var body: [String: Any] = [:]

@@ -234,7 +234,7 @@ struct TrackMenu: View {
         }
         if let artist = track.artist.nonEmpty {
             Button {
-                player.play(["artist": artist])
+                player.playCatalog(artist: artist)
             } label: { Label("Весь артист", systemImage: "music.mic") }
         }
         Menu {
@@ -249,7 +249,7 @@ struct TrackMenu: View {
         } label: { Label("Не предлагать", systemImage: "eye.slash") }
         if let album = track.album.nonEmpty {
             Button {
-                player.play(["artist": track.artist ?? "", "album": album])
+                player.playCatalog(artist: track.artist, album: album)
             } label: { Label("Весь альбом", systemImage: "square.stack") }
         }
     }

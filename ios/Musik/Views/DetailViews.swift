@@ -23,7 +23,7 @@ struct ArtistDetailView: View {
                         photo: photo,
                         subtitle: "\(tracks.count) треков",
                         isFavorite: app.favoriteArtists.contains(artist),
-                        onPlay: { player.play(["artist": artist]) },
+                        onPlay: { player.playCatalog(artist: artist, tracks: tracks) },
                         onRadio: radioAction,
                         onFavorite: { Task { await app.toggleFavoriteArtist(artist) } },
                         tint: $tint,
@@ -37,7 +37,7 @@ struct ArtistDetailView: View {
                         subtitle: "\(tracks.count) треков",
                         round: true,
                         isFavorite: app.favoriteArtists.contains(artist),
-                        onPlay: { player.play(["artist": artist]) },
+                        onPlay: { player.playCatalog(artist: artist, tracks: tracks) },
                         onRadio: radioAction,
                         onFavorite: { Task { await app.toggleFavoriteArtist(artist) } }
                     )
@@ -55,7 +55,7 @@ struct ArtistDetailView: View {
                 }
 
                 TrackList(tracks: tracks, loaded: loaded) { t in
-                    player.play(["artist": artist, "start_track_id": t.id])
+                    player.playCatalog(artist: artist, tracks: tracks, startTrackId: t.id)
                 }
 
                 if !similar.isEmpty {
@@ -124,7 +124,7 @@ struct AlbumDetailView: View {
                         .filter { !$0.isEmpty }.joined(separator: " · "),
                     round: false,
                     isFavorite: app.favoriteAlbums.contains(albumKey(artist, album)),
-                    onPlay: { player.play(["artist": artist ?? "", "album": album]) },
+                    onPlay: { player.playCatalog(artist: artist, album: album, tracks: tracks) },
                     onRadio: radioAction,
                     onFavorite: { Task { await app.toggleFavoriteAlbum(artist: artist, album: album) } }
                 )
@@ -138,7 +138,7 @@ struct AlbumDetailView: View {
                 }
 
                 TrackList(tracks: tracks, loaded: loaded, numbered: true) { t in
-                    player.play(["artist": artist ?? "", "album": album, "start_track_id": t.id])
+                    player.playCatalog(artist: artist, album: album, tracks: tracks, startTrackId: t.id)
                 }
 
                 if !similar.isEmpty {

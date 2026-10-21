@@ -287,7 +287,7 @@ struct TipCard: View {
             if let ids = tip.trackIds, !ids.isEmpty {
                 player.play(["track_ids": ids, "name": tip.album ?? tip.artist ?? "Открытие"])
             } else {
-                player.play(["artist": tip.artist ?? "", "album": tip.album ?? ""])
+                player.playCatalog(artist: tip.artist, album: tip.album)
             }
         } label: {
             VStack(alignment: .leading, spacing: 6) {
