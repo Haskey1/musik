@@ -5,6 +5,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -14,6 +15,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -114,6 +116,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun NowPlayingScreen(onClose: () -> Unit) {
     val player = App.player
@@ -376,6 +379,8 @@ private fun Transport() {
 
 private val LikeRed = Color(0xFFF0453A)
 
+private fun RowScope.cell(): Modifier = Modifier.weight(1f)
+
 @Composable
 private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
     val player = App.player
@@ -395,15 +400,14 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
             pulse.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 700f))
         }
     }
-    val cell = Modifier.weight(1f)
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GlassChip(onClick = { player.dislike() }, cell, active = player.disliked) {
+            GlassChip(onClick = { player.dislike() }, cell(), active = player.disliked) {
                 Icon(if (player.disliked) Icons.Filled.HeartBroken else Icons.Outlined.HeartBroken, if (player.disliked) "Снять дизлайк" else "Дизлайк", Modifier.size(22.dp))
             }
             GlassChip(
                 onClick = { if (offline.isSaved(track.id)) offline.remove(track.id) else offline.save(track) },
-                cell, active = offline.isSaved(track.id),
+                cell(), active = offline.isSaved(track.id),
             ) {
                 when {
                     track.id in offline.downloading -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
@@ -411,7 +415,7 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
                     else -> Icon(Icons.Outlined.DownloadForOffline, "Сохранить на телефон", Modifier.size(22.dp))
                 }
             }
-            GlassChip(onClick = { player.like() }, cell, active = favorite) {
+            GlassChip(onClick = { player.like() }, cell(), active = favorite) {
                 Icon(
                     if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, "Любимая",
                     Modifier.size(22.dp).graphicsLayer { scaleX = pulse.value; scaleY = pulse.value },
@@ -420,13 +424,13 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
             }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GlassChip(onClick = { player.playSimilarNow() }, cell) {
+            GlassChip(onClick = { player.playSimilarNow() }, cell()) {
                 Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp)); Text("Похожее", maxLines = 1)
             }
-            GlassChip(onClick = onLyrics, cell, active = lyricsOn) {
+            GlassChip(onClick = onLyrics, cell(), active = lyricsOn) {
                 Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(18.dp)); Text("Текст", maxLines = 1)
             }
-            GlassChip(onClick = { player.startRadio(seed = track.id) }, cell) {
+            GlassChip(onClick = { player.startRadio(seed = track.id) }, cell()) {
                 Icon(Icons.Filled.Radio, null, Modifier.size(18.dp)); Text("Радио", maxLines = 1)
             }
         }
