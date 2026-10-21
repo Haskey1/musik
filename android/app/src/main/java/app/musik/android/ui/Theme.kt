@@ -77,7 +77,10 @@ private val scheme = darkColorScheme(
 
 @Composable
 fun MusikTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = scheme, typography = Typography(), content = content)
+    MaterialTheme(colorScheme = scheme, typography = Typography()) {
+        // No Surface wraps the app (the backdrop is drawn by hand), so text would default to black.
+        CompositionLocalProvider(LocalContentColor provides Color.White, content = content)
+    }
 }
 
 fun displayStyle(size: Int) = TextStyle(fontSize = size.sp, fontWeight = FontWeight.Black, letterSpacing = (-1).sp)
