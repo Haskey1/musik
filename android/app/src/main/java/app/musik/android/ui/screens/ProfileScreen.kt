@@ -22,6 +22,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Undo
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.ContentCopy
@@ -29,7 +30,9 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
@@ -57,11 +60,13 @@ import app.musik.android.data.RadioRule
 import app.musik.android.data.ShareLink
 import app.musik.android.playback.ArtistSkips
 import app.musik.android.ui.App
+import app.musik.android.ui.LocalNavigator
 import app.musik.android.ui.StatusBarScrim
 import app.musik.android.ui.ChipButton
 import app.musik.android.ui.EmptyHint
 import app.musik.android.ui.MusikColors
 import app.musik.android.ui.displayStyle
+import kotlin.math.roundToInt
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 
@@ -79,6 +84,7 @@ fun ProfileScreen() {
     var mobileStream by remember { mutableStateOf(settings.mobileStream) }
     var confirmLogout by remember { mutableStateOf(false) }
     var showEqualizer by remember { mutableStateOf(false) }
+    val nav = LocalNavigator.current
 
     LaunchedEffect(Unit) {
         coroutineScope {
@@ -107,21 +113,31 @@ fun ProfileScreen() {
 
         Section("Вкус") {
             val p = profile
-            Text(Labels.maturity(App.player.maturity ?: p?.maturity), color = MusikColors.teal, fontWeight = FontWeight.SemiBold)
+            Text(Labels.maturity(App.player.maturity ?: p?.maturity), fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
             if (p != null) {
+                // Same as iOS: a progress bar and the raw counters instead of a bare «уверенность 100%».
+                LinearProgressIndicator(
+                    progress = { (p.confidence ?: 0.0).coerceIn(0.0, 1.0).toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MusikColors.accent, trackColor = Color.White.copy(alpha = 0.1f),
+                )
                 Text(
-                    "Лайков и дослушанных: ${p.nPositive ?: 0} · скипов: ${p.nNegative ?: 0}" +
-                        (p.confidence?.let { " · уверенность ${(it * 100).toInt()}%" } ?: ""),
+                    "${p.nPositive ?: 0} положительных сигналов из ${p.readyAt ?: 8} · ${p.nNegative ?: 0} скипов/дизлайков",
                     color = MusikColors.muted, style = MaterialTheme.typography.bodySmall,
                 )
+                p.exploreRatio?.let {
+                    Text("Доля исследования: ${(it * 100).roundToInt()}%", color = MusikColors.muted, style = MaterialTheme.typography.bodySmall)
+                }
                 p.topArtists?.takeIf { it.isNotEmpty() }?.let { top ->
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        top.take(12).forEach { a ->
-                            Text(
-                                "${a.artist} · ${a.count}",
-                                Modifier.background(MusikColors.surfaceHigh, RoundedCornerShape(50)).padding(horizontal = 10.dp, vertical = 5.dp),
-                                style = MaterialTheme.typography.labelMedium,
-                            )
+                    HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                    top.forEach { a ->
+                        Row(
+                            Modifier.fillMaxWidth().clickable { nav.openArtist(a.artist) }.padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(a.artist, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text("${a.count}", color = MusikColors.muted)
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null, tint = MusikColors.muted)
                         }
                     }
                 }

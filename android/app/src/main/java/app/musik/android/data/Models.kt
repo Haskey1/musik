@@ -228,6 +228,7 @@ data class Profile(
     @SerialName("ready_at") val readyAt: Int? = null,
     @SerialName("forming_at") val formingAt: Int? = null,
     val confidence: Double? = null,
+    @SerialName("explore_ratio") val exploreRatio: Double? = null,
     @SerialName("top_artists") val topArtists: List<ArtistCount>? = null,
 )
 
