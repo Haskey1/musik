@@ -2,6 +2,7 @@ package app.musik.android.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -160,17 +161,21 @@ fun Card(
 @Composable
 fun MixCard(mix: Mix, onClick: () -> Unit) {
     val today = mix.today == true || mix.highlight == true
-    Card(mix.title, mix.subtitle.nonEmpty ?: mix.metaLabel, onClick = onClick, note = if (today) "сегодня" else null) { m ->
+    val shape = RoundedCornerShape(14.dp)
+    // As on iOS: plain cover (accent frame and «сегодня» pill for today's mix), title and count below.
+    Card(mix.title, mix.metaLabel, onClick = onClick) { m ->
         Box(m) {
-            Artwork(mix.coverTrackId, Modifier.fillMaxSize(), 256, mix.title, RoundedCornerShape(14.dp))
-            Box(
-                Modifier.fillMaxSize().clip(RoundedCornerShape(14.dp))
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)))),
-            )
-            Text(
-                mix.title, Modifier.align(Alignment.BottomStart).padding(10.dp),
-                color = Color.White, fontWeight = FontWeight.Black, fontSize = 17.sp, maxLines = 2,
-            )
+            Artwork(mix.coverTrackId, Modifier.fillMaxSize(), 256, mix.title, shape)
+            if (today) {
+                Box(Modifier.fillMaxSize().border(2.dp, MusikColors.accent, shape))
+                Text(
+                    "сегодня",
+                    Modifier.align(Alignment.BottomStart).padding(8.dp)
+                        .background(MusikColors.accent, RoundedCornerShape(50))
+                        .padding(horizontal = 10.dp, vertical = 3.dp),
+                    color = Color.Black.copy(alpha = 0.85f), fontWeight = FontWeight.Bold, fontSize = 13.sp,
+                )
+            }
         }
     }
 }
