@@ -120,7 +120,7 @@ fun ArtistScreen(name: String) {
     }
 
     val albums = remember(tracks) { tracks.mapNotNull { it.album.nonEmpty }.distinct() }
-    val onPlay = { player.play(jsonBody("artist" to name)) }
+    val onPlay = { player.playCatalog(name, tracks = tracks) }
     val onRadio = tracks.firstOrNull()?.let { first -> { player.startRadio(seed = first.id) } }
     val favorite = name in state.favoriteArtists
 
@@ -202,7 +202,7 @@ fun ArtistScreen(name: String) {
             if (!loaded) item { Loading() }
             else if (tracks.isEmpty()) item { EmptyHint("Треков не найдено") }
             itemsIndexed(tracks) { _, t ->
-                TrackRow(t, Modifier.padding(horizontal = 16.dp)) { player.play(jsonBody("artist" to name, "start_track_id" to t.id)) }
+                TrackRow(t, Modifier.padding(horizontal = 16.dp)) { player.playCatalog(name, tracks = tracks, startTrackId = t.id) }
             }
             if (similar.isNotEmpty()) item {
                 Column(Modifier.padding(top = 20.dp)) {
@@ -234,7 +234,7 @@ fun AlbumScreen(artist: String?, album: String) {
     }
     val artistName = artist.nonEmpty ?: tracks.firstOrNull()?.artist.nonEmpty
     val favorite = albumKey(artist, album) in state.favoriteAlbums
-    val onPlay = { player.play(jsonBody("artist" to (artist ?: ""), "album" to album)) }
+    val onPlay = { player.playCatalog(artist, album, tracks) }
     val onRadio = tracks.firstOrNull()?.let { first -> { player.startRadio(seed = first.id) } }
 
     Box(Modifier.fillMaxSize()) {
@@ -263,7 +263,7 @@ fun AlbumScreen(artist: String?, album: String) {
             else if (tracks.isEmpty()) item { EmptyHint("Треков не найдено") }
             itemsIndexed(tracks) { i, t ->
                 TrackRow(t, Modifier.padding(horizontal = 16.dp), index = i, showArtwork = false) {
-                    player.play(jsonBody("artist" to (artist ?: ""), "album" to album, "start_track_id" to t.id))
+                    player.playCatalog(artist, album, tracks, t.id)
                 }
             }
             if (similar.isNotEmpty()) item {

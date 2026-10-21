@@ -206,6 +206,26 @@ class PlayerController(
     /** POST /api/play: `track_id`, `track_ids`, `artist`, `album`, `start_track_id`, `name`. */
     fun play(body: JsonObject) = start { api.play(body) }
 
+    /**
+     * Plays an artist or an album as a fixed list of ids, like the web UI does.
+     * `/api/play` with `artist` only matches the exact artist field, while `/api/library`
+     * also lists tracks where the artist is a co-author («X Feat. Y»), so such pages used to
+     * fail with «ничего не найдено». [tracks] is the list the page already shows; without it
+     * the library is asked first.
+     */
+    fun playCatalog(artist: String?, album: String? = null, tracks: List<Track> = emptyList(), startTrackId: Int? = null) {
+        val artistName = artist?.trim().orEmpty()
+        val albumName = album?.trim().orEmpty()
+        val name = listOf(artistName, albumName).filter { it.isNotEmpty() }.joinToString(" — ")
+        start {
+            val list = tracks.ifEmpty {
+                api.library(artist = artistName.ifEmpty { null }, album = albumName.ifEmpty { null })
+            }
+            if (list.isEmpty()) throw ApiError(0, "empty", "Треков не нашлось")
+            api.play(jsonBody("track_ids" to list.map { it.id }, "name" to name.ifEmpty { "Плейлист" }, "start_track_id" to startTrackId))
+        }
+    }
+
     fun playMix(kind: String, startTrackId: Int? = null) = start { api.playMix(kind, startTrackId) }
 
     fun playSimilarNow() {

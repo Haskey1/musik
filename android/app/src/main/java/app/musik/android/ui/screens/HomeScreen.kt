@@ -268,7 +268,7 @@ private fun TipCard(tip: DiscoverTip) {
         onClick = {
             val ids = tip.trackIds
             if (!ids.isNullOrEmpty()) player.play(jsonBody("track_ids" to ids, "name" to (tip.album ?: tip.artist ?: "Открытие")))
-            else player.play(jsonBody("artist" to (tip.artist ?: ""), "album" to (tip.album ?: "")))
+            else player.playCatalog(tip.artist, tip.album)
         },
     ) { m -> Artwork(tip.coverTrackId, m, 256, tip.album ?: "♪") }
 }
