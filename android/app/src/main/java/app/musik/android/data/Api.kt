@@ -232,6 +232,7 @@ class Api(private val settings: Settings) {
     }
 
     suspend fun profile(): Profile = get("/api/profile")
+    suspend fun health(): Health = get("/api/health")
 
     // MARK: Catalog
 

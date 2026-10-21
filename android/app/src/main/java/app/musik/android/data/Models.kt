@@ -207,6 +207,14 @@ data class AuthMe(
 )
 
 @Serializable
+data class Health(
+    val ok: Boolean? = null,
+    val version: String? = null,
+    @SerialName("api_version") val apiVersion: String? = null,
+    val tracks: Int? = null,
+)
+
+@Serializable
 data class IssuedToken(val token: String? = null)
 
 @Serializable

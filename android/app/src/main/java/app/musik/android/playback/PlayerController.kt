@@ -24,7 +24,9 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RenderersFactory
+import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
@@ -118,11 +120,11 @@ class PlayerController(
 
     val exo: ExoPlayer = run {
         val sink: AudioSink = DefaultAudioSink.Builder(context)
-            .setAudioProcessors(arrayOf(EqualizerProcessor()))
+            .setAudioProcessors(arrayOf<AudioProcessor>(EqualizerProcessor()))
             .build()
         // Music only: one audio renderer whose sink carries the equalizer.
         val renderers = RenderersFactory { handler, _, audioListener, _, _ ->
-            arrayOf(MediaCodecAudioRenderer(context, MediaCodecSelector.DEFAULT, handler, audioListener, sink))
+            arrayOf<Renderer>(MediaCodecAudioRenderer(context, MediaCodecSelector.DEFAULT, handler, audioListener, sink))
         }
         ExoPlayer.Builder(context, renderers)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
