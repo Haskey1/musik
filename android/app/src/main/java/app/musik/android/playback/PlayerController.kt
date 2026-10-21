@@ -283,8 +283,11 @@ class PlayerController(
     suspend fun restore() {
         if (current != null) return
         val sid = settings.sessionId ?: return
+        val seq = requestSeq
         try {
             val payload = api.now(sid)
+            // a share link (or any tap) may have started something while /api/now was on its way
+            if (current != null || requestSeq != seq) return
             setSession(sid)
             apply(payload, autoplay = false)
         } catch (e: ApiError) {

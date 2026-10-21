@@ -2,6 +2,7 @@ package app.musik.android
 
 import android.Manifest
 import android.content.ComponentName
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -42,6 +43,8 @@ class MainActivity : ComponentActivity() {
         )
         super.onCreate(savedInstanceState)
         val app = application as MusikApp
+        // a link that started the app (not a re-created activity after rotation)
+        if (savedInstanceState == null) DeepLinks.accept(intent)
         setContent {
             MusikTheme {
                 Root(app.state)
@@ -53,6 +56,12 @@ class MainActivity : ComponentActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        DeepLinks.accept(intent)
     }
 
     override fun onStart() {

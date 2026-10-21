@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Radio
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.musik.android.data.AlbumItem
 import app.musik.android.data.ArtistItem
+import app.musik.android.data.Links
 import app.musik.android.data.Track
 import app.musik.android.data.albumKey
 import app.musik.android.data.jsonBody
@@ -210,7 +212,7 @@ fun ArtistScreen(name: String) {
                 }
             }
         }
-        DetailTopBar(title = name, showTitle = photo == null || collapsed, solid = photo == null || collapsed)
+        DetailTopBar(title = name, showTitle = photo == null || collapsed, solid = photo == null || collapsed, shareUrl = Links.artist(App.settings.baseUrl, name))
     }
 }
 
@@ -272,7 +274,7 @@ fun AlbumScreen(artist: String?, album: String) {
                 }
             }
         }
-        DetailTopBar(title = album, showTitle = true, solid = true)
+        DetailTopBar(title = album, showTitle = true, solid = true, shareUrl = Links.album(App.settings.baseUrl, artist, album))
     }
 }
 
@@ -308,8 +310,9 @@ private fun DetailHeader(
 
 /** Back button and title over a detail page; transparent over an artist photo until it scrolls away. */
 @Composable
-private fun DetailTopBar(title: String, showTitle: Boolean, solid: Boolean) {
+private fun DetailTopBar(title: String, showTitle: Boolean, solid: Boolean, shareUrl: String) {
     val nav = LocalNavigator.current
+    val context = LocalContext.current
     val bg by animateColorAsState(if (solid) MusikColors.background.copy(alpha = 0.96f) else Color.Transparent, tween(200), label = "bar")
     Row(
         Modifier.fillMaxWidth().background(bg).statusBarsPadding().height(56.dp).padding(horizontal = 4.dp),
@@ -324,7 +327,13 @@ private fun DetailTopBar(title: String, showTitle: Boolean, solid: Boolean) {
                 title, Modifier.padding(horizontal = 8.dp).weight(1f), fontWeight = FontWeight.SemiBold,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
+        } else {
+            Spacer(Modifier.weight(1f))
         }
+        IconButton(
+            onClick = { shareText(context, shareUrl) },
+            modifier = Modifier.background(if (solid) Color.Transparent else Color.Black.copy(alpha = 0.3f), CircleShape),
+        ) { Icon(Icons.Filled.Share, "Поделиться", tint = Color.White) }
     }
 }
 

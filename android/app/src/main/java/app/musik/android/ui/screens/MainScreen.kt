@@ -58,6 +58,14 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import app.musik.android.AppState
+import app.musik.android.DeepLink
+import app.musik.android.DeepLinks
+import app.musik.android.data.jsonBody
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.launch
 import app.musik.android.ui.App
 import app.musik.android.ui.Artwork
 import app.musik.android.ui.LocalNavigator
@@ -82,6 +90,22 @@ fun MainScreen(state: AppState) {
     val player = App.player
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
+
+    LaunchedEffect(Unit) {
+        snapshotFlow { DeepLinks.pending }.filterNotNull().collect { link ->
+            DeepLinks.pending = null
+            when (link) {
+                is DeepLink.Track -> {
+                    player.play(jsonBody("track_id" to link.id))
+                    showPlayer = true
+                    // if nothing started (no such track, no network), don't leave the player armed
+                    launch { delay(10_000); if (player.current == null) showPlayer = false }
+                }
+                is DeepLink.Artist -> navigator.openArtist(link.name)
+                is DeepLink.Album -> navigator.openAlbum(link.artist, link.album)
+            }
+        }
+    }
 
     CompositionLocalProvider(LocalNavigator provides navigator) {
         Box(Modifier.fillMaxSize()) {

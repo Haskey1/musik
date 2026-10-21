@@ -54,7 +54,9 @@ import androidx.compose.ui.unit.sp
 import app.musik.android.MusikApp
 import app.musik.android.data.AlbumItem
 import app.musik.android.data.ArtistItem
+import app.musik.android.data.Links
 import app.musik.android.data.Mix
+import app.musik.android.ui.screens.shareText
 import app.musik.android.data.Track
 import app.musik.android.data.formatTime
 import app.musik.android.data.jsonBody
@@ -268,6 +270,7 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit) {
     val player = App.player
     val offline = App.offline
     val nav = LocalNavigator.current
+    val context = LocalContext.current
     DropdownMenu(expanded, onDismiss, containerColor = MusikColors.surfaceHigh) {
         MenuItem("Играть трек", onDismiss) { player.play(jsonBody("track_id" to track.id, "name" to track.displayTitle)) }
         MenuItem("Радио от трека", onDismiss) { player.startRadio(seed = track.id) }
@@ -277,6 +280,7 @@ fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit) {
         }
         if (offline.isSaved(track.id)) MenuItem("Удалить с телефона", onDismiss) { offline.remove(track.id) }
         else MenuItem("Сохранить на телефон", onDismiss) { offline.save(track) }
+        MenuItem("Поделиться", onDismiss) { shareText(context, Links.track(App.settings.baseUrl, track)) }
         track.artist.nonEmpty?.let { a -> MenuItem("Весь артист", onDismiss) { nav.openArtist(a) } }
         track.album.nonEmpty?.let { al -> MenuItem("Весь альбом", onDismiss) { nav.openAlbum(track.artist, al) } }
         HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
