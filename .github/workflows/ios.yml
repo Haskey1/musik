@@ -5,6 +5,7 @@ name: ios
 # AltStore (Windows works), which re-sign it with a free Apple ID. See ios/README.md.
 on:
   push:
+    branches: ["**"]
     paths: ["ios/**", ".github/workflows/ios.yml"]
     tags: ["ios-v*"]
   pull_request:
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-15-intel   # arm64 Macs are short on capacity right now
     timeout-minutes: 30
     defaults:
       run:
@@ -41,8 +42,11 @@ jobs:
             -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build/dd \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            MUSIK_SERVER_URL="${{ vars.MUSIK_SERVER_URL }}" \
             > build/xcodebuild.log 2>&1 || status=$?
           grep -E '(error:|BUILD SUCCEEDED|BUILD FAILED)' build/xcodebuild.log || true
+          # compile errors as annotations, readable without downloading the log
+          grep -E 'error:' build/xcodebuild.log | sed 's|.*/ios/||' | sort -u | head -10 | while IFS= read -r l; do echo "::error::$l"; done
           exit $status
       - name: Package .ipa
         run: |

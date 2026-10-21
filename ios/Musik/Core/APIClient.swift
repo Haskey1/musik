@@ -82,9 +82,11 @@ final class APIClient: @unchecked Sendable {
     // MARK: Requests
 
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [],
-              body: [String: Any]? = nil, redirectOn401: Bool = true) async throws -> Data {
+              body: [String: Any]? = nil, redirectOn401: Bool = true,
+              timeout: TimeInterval? = nil) async throws -> Data {
         var req = URLRequest(url: try url(path, query: query))
         req.httpMethod = method
+        if let timeout { req.timeoutInterval = timeout }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
         if method != "GET" {

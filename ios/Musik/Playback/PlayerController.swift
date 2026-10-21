@@ -1,5 +1,6 @@
 import AVFoundation
 import MediaPlayer
+import Network
 import UIKit
 
 /// Playback state machine mirroring the web client (app.js):
@@ -16,17 +17,32 @@ final class PlayerController: ObservableObject {
     @Published private(set) var maturity: String?
     @Published private(set) var isPlaying = false
     @Published private(set) var isBuffering = false
-    @Published private(set) var position: Double = 0
-    @Published private(set) var duration: Double = 0
+    /// Position and duration change twice a second; they live in `clock` so that only the
+    /// seek bar, the mini player's progress line and lyrics redraw — not every list row.
+    let clock = PlaybackClock()
+    private(set) var position: Double = 0 {
+        didSet { if clock.position != position { clock.position = position } }
+    }
+    private(set) var duration: Double = 0 {
+        didSet { if clock.duration != duration { clock.duration = duration } }
+    }
     @Published private(set) var disliked = false
     /// A start / skip request is in flight.
     @Published private(set) var busy = false
+    /// Playing files from the phone (saved or prefetched) without the server.
+    @Published private(set) var offlineMode = false
+    /// The device has a network path (NWPathMonitor); says nothing about the server itself.
+    @Published private(set) var networkUp = true
 
     weak var app: AppState?
 
     private let api: APIClient
     private let settings: Settings
-    private let player = AVPlayer()
+    private let offline: OfflineStore
+    /// The active player. During a crossfade `spare` holds the outgoing track; afterwards
+    /// the two swap roles, so the next crossfade starts the other way round.
+    private var player = AVPlayer()
+    private var spare = AVPlayer()
 
     private(set) var sessionId: String?
     /// Bumped whenever the loaded item or pending advance changes; stale item callbacks compare against it.
@@ -42,6 +58,11 @@ final class PlayerController: ObservableObject {
     private var seeking = false
 
     private var timeObserver: Any?
+    private weak var timeObserverOwner: AVPlayer?
+    /// A crossfade into the next track was started; the next `load` consumes it.
+    private var crossfadeArmed = false
+    private(set) var crossfading = false
+    private var fadeTask: Task<Void, Never>?
     private var statusObservation: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
     private var itemNotifications: [NSObjectProtocol] = []
@@ -49,13 +70,30 @@ final class PlayerController: ObservableObject {
     private var nowPlayingArtwork: MPMediaItemArtwork?
     private var interruptionObserver: NSObjectProtocol?
 
-    init(api: APIClient, settings: Settings) {
+    // Offline playback: a local list played without server events.
+    private var offlineList: [Track] = []
+    private var offlineIndex = 0
+    /// Entered automatically because the server went away (vs. «Сохранённые» chosen by hand);
+    /// only then does the player switch back to online radio when the network returns.
+    private var offlineFallback = false
+    /// While playing saved tracks because the server was gone: the server answers again,
+    /// so the next track boundary switches back to online radio.
+    private var serverReachable = false
+    private var probeTask: Task<Void, Never>?
+    private var stallTask: Task<Void, Never>?
+    private var prefetchTask: Task<Void, Never>?
+    private let pathMonitor = NWPathMonitor()
+
+    init(api: APIClient, settings: Settings, offline: OfflineStore) {
         self.api = api
         self.settings = settings
+        self.offline = offline
         player.automaticallyWaitsToMinimizeStalling = true
+        spare.automaticallyWaitsToMinimizeStalling = true
         configureAudioSession()
         configureRemoteCommands()
         observePlayer()
+        observeNetwork()
     }
 
     var hasSession: Bool { sessionId != nil }
@@ -71,6 +109,30 @@ final class PlayerController: ObservableObject {
     /// POST /api/play: `track_id`, `track_ids`, `artist`, `album`, `start_track_id`, `name`.
     func play(_ body: [String: Any]) {
         start { try await self.api.post("/api/play", body) }
+    }
+
+    /// Plays an artist or an album as a fixed list of ids, like the web UI does.
+    /// `/api/play` with `artist` only matches the exact artist field, so tracks where the
+    /// artist is a co-author («X feat. Y») — which `/api/library` does list — weren't found.
+    /// `tracks` is the list the page already shows; without it the library is asked first.
+    func playCatalog(artist: String?, album: String? = nil, tracks: [Track] = [],
+                     startTrackId: Int? = nil) {
+        let artistName = artist?.trimmingCharacters(in: .whitespaces) ?? ""
+        let albumName = album?.trimmingCharacters(in: .whitespaces) ?? ""
+        let name = [artistName, albumName].filter { !$0.isEmpty }.joined(separator: " — ")
+        start {
+            var list = tracks
+            if list.isEmpty {
+                list = try await self.api.library(artist: artistName.isEmpty ? nil : artistName,
+                                                  album: albumName.isEmpty ? nil : albumName)
+            }
+            guard !list.isEmpty else {
+                throw APIError(status: 0, code: "empty", message: "Треков не нашлось")
+            }
+            var body: [String: Any] = ["track_ids": list.map(\.id), "name": name.isEmpty ? "Плейлист" : name]
+            if let startTrackId { body["start_track_id"] = startTrackId }
+            return try await self.api.post("/api/play", body)
+        }
     }
 
     func playMix(_ kind: String, startTrackId: Int? = nil) {
@@ -96,6 +158,13 @@ final class PlayerController: ObservableObject {
 
     /// Jump inside the current list / radio queue.
     func jump(trackId: Int, index: Int) {
+        if offlineMode {
+            guard trackId != current?.id,
+                  let i = offlineList.firstIndex(where: { $0.id == trackId }) else { return }
+            offlineIndex = i
+            load(offlineList[i], autoplay: true)
+            return
+        }
         guard let sid = sessionId, trackId != current?.id else { return }
         start {
             try await self.api.post("/api/session/jump", ["session_id": sid, "index": index, "track_id": trackId])
@@ -103,6 +172,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func start(_ request: @escaping () async throws -> PlayPayload) {
+        crossfadeArmed = false
         generation += 1
         let req = nextRequest()
         Task {
@@ -112,7 +182,14 @@ final class PlayerController: ObservableObject {
                 guard req == self.requestSeq else { return }
                 self.apply(payload, autoplay: true)
             } catch {
-                self.app?.show(error)
+                guard req == self.requestSeq else { return }
+                // Radio asked for with no server in reach: play what is saved on the phone.
+                if Self.isNetwork(error), !self.offline.saved.isEmpty {
+                    self.offlineMode = false
+                    self.enterOfflineFallback()
+                } else {
+                    self.app?.show(error)
+                }
             }
         }
     }
@@ -122,6 +199,8 @@ final class PlayerController: ObservableObject {
         guard current == nil, let sid = settings.sessionId else { return }
         do {
             let payload: PlayPayload = try await api.get("/api/now", query: [URLQueryItem(name: "session_id", value: sid)])
+            // something else (a shared link) started playing while we were asking
+            guard current == nil, requestSeq == 0 else { return }
             setSession(sid)
             apply(payload, autoplay: false)
         } catch let e as APIError where e.isNotFound {
@@ -130,6 +209,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func apply(_ p: PlayPayload, autoplay: Bool) {
+        leaveOffline()
         if let sid = p.sessionId { setSession(sid) }
         if let m = p.maturity { maturity = m }
         let tracks = p.tracks ?? []
@@ -159,6 +239,7 @@ final class PlayerController: ObservableObject {
 
     func togglePlay() {
         if isPlaying {
+            stopFadeNow()
             player.pause()
         } else {
             resume()
@@ -176,10 +257,14 @@ final class PlayerController: ObservableObject {
         if !startSent { sendStart(track) }
     }
 
-    func pause() { player.pause() }
+    func pause() {
+        stopFadeNow()
+        player.pause()
+    }
 
     func seek(to seconds: Double) {
         guard player.currentItem != nil else { return }
+        stopFadeNow()
         let target = max(0, duration > 0 ? min(seconds, duration - 0.25) : seconds)
         seeking = true
         position = target
@@ -196,19 +281,33 @@ final class PlayerController: ObservableObject {
     }
 
     func skip() {
+        crossfadeArmed = false
+        stopFadeNow()
+        if offlineMode {
+            offlineStep(+1)
+            return
+        }
         guard let track = current, sessionId != nil else { return }
+        if duration > 0, listened / duration < 0.3 { noteEarlySkip(track) }
+        if playAheadLocally(after: track, event: "skip", reason: "skipped") { return }
         generation += 1
         let req = nextRequest()
         player.pause()
         Task {
             defer { self.finish(req) }
             do {
-                let res = try await self.postEvent("skip", track: track, reason: "skipped", retry: true)
+                let res = try await self.postEvent("skip", track: track, reason: "skipped",
+                                                   retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {
-                self.app?.show(error)
-                if req == self.requestSeq { self.player.play() }
+                guard req == self.requestSeq else { return }
+                if Self.isNetwork(error) {
+                    self.enterOfflineFallback()
+                } else {
+                    self.app?.show(error)
+                    self.player.play()
+                }
             }
         }
     }
@@ -224,6 +323,15 @@ final class PlayerController: ObservableObject {
     }
 
     func back() {
+        if offlineMode {
+            if position > 3 || offlineIndex == 0 {
+                seek(to: 0)
+                if !isPlaying { resume() }
+            } else {
+                offlineStep(-1)
+            }
+            return
+        }
         guard current != nil, let sid = sessionId else { return }
         if position > 3 {
             seek(to: 0)
@@ -236,19 +344,60 @@ final class PlayerController: ObservableObject {
 
     private func trackFinished(gen: Int) {
         guard gen == generation, let track = current else { return }
+        ArtistSkips.reset(track.artist)
+        if offlineMode {
+            offlineStep(+1)
+            return
+        }
+        if playAheadLocally(after: track, event: "track_end", reason: "completed") { return }
         generation += 1
         requestSeq += 1
         let req = requestSeq
         position = duration
         Task {
             do {
-                let res = try await self.postEvent("track_end", track: track, reason: "completed", retry: true)
+                let res = try await self.postEvent("track_end", track: track, reason: "completed",
+                                                   retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {
-                self.app?.show(error)
+                guard req == self.requestSeq else { return }
+                // No server to ask for the next track: carry on from the phone.
+                if Self.isNetwork(error) { self.enterOfflineFallback() } else { self.app?.show(error) }
             }
         }
+    }
+
+    /// How long to wait for the server before playing from the phone instead.
+    private static let eventTimeout: TimeInterval = 7
+
+    /// Next track already downloaded: start it right away and tell the server in the
+    /// background, so a slow network (EDGE) gives no pause between tracks. The server's
+    /// answer only refreshes the queue; if it never comes, the player goes offline
+    /// without interrupting the track that is already playing.
+    private func playAheadLocally(after track: Track, event: String, reason: String) -> Bool {
+        guard !fixed || playlist.count > 1,
+              let next = upcomingTracks(1).first, offline.playableURL(next.id) != nil else { return false }
+        requestSeq += 1
+        let req = requestSeq
+        load(next, autoplay: true, announce: false)
+        Task {
+            do {
+                let res = try await self.postEvent(event, track: track, reason: reason,
+                                                   retry: true, timeout: Self.eventTimeout)
+                guard req == self.requestSeq, self.current?.id == next.id else { return }
+                if let res {
+                    self.applyLists(res)
+                    // the server's copy carries this play's impression id
+                    if let fresh = res.next, fresh.id == next.id { self.current = fresh }
+                }
+                if let cur = self.current { self.sendStart(cur) }
+            } catch {
+                guard req == self.requestSeq, self.current?.id == next.id else { return }
+                if Self.isNetwork(error) { self.enterOfflineFallback(keepCurrent: true) }
+            }
+        }
+        return true
     }
 
     private func advance(with res: EventResult) {
@@ -271,6 +420,7 @@ final class PlayerController: ObservableObject {
         } else if let q = res.queue {
             queue = q
         }
+        schedulePrefetch()
     }
 
     // MARK: - Rating
@@ -284,9 +434,28 @@ final class PlayerController: ObservableObject {
     func like() {
         guard let track = current, let app else { return }
         Task {
-            if await app.toggleFavoriteTrack(track.id) == true {
+            let liked = await app.toggleFavoriteTrack(track.id, track: track)
+            if liked == true { ArtistSkips.reset(track.artist) }
+            self.updateFeedbackCommands()
+            if liked == true {
                 if let res = try? await self.postEvent("like", track: track) { self.applyLists(res) }
             }
+        }
+    }
+
+    /// From the lock screen or the car: a dislike also moves on to the next track.
+    func dislikeAndSkip() {
+        guard let track = current else { return }
+        if offlineMode {
+            skip()
+            return
+        }
+        Task {
+            if let res = try? await self.postEvent("dislike", track: track) {
+                self.applyLists(res)
+                self.app?.show("Дизлайк — меньше такого")
+            }
+            if track.id == self.current?.id { self.skip() }
         }
     }
 
@@ -296,7 +465,10 @@ final class PlayerController: ObservableObject {
             do {
                 guard let res = try await self.postEvent("dislike", track: track) else { return }
                 self.applyLists(res)
-                if track.id == self.current?.id { self.disliked = true }
+                if track.id == self.current?.id {
+                    self.disliked = true
+                    self.updateFeedbackCommands()
+                }
                 self.app?.show(res.ignored == true ? "Уже дизлайк" : "Дизлайк — меньше такого")
             } catch {
                 self.app?.show(error)
@@ -304,9 +476,71 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    /// Taps the dislike again: takes it back (history, counters and taste on the server).
+    /// A server without the `undislike` event still gets the button reset, with a hint.
+    func undislike() {
+        guard let track = current, disliked else { return }
+        Task {
+            var note = "Дизлайк снят"
+            do {
+                if let res = try await self.postEvent("undislike", track: track) { self.applyLists(res) }
+            } catch let e as APIError where e.code == "unknown_event" {
+                note = "Дизлайк снят в приложении — обнови сервер, чтобы он забыл его"
+            } catch {
+                self.app?.show(error)
+                return
+            }
+            if track.id == self.current?.id {
+                self.disliked = false
+                self.updateFeedbackCommands()
+            }
+            self.app?.show(note)
+        }
+    }
+
+    // MARK: - Hiding
+
+    enum HideTarget { case track, artist }
+
+    /// «Скрыть»: never again in radio, mixes and recommendations (undo in Profile → Скрыто).
+    func hide(_ target: HideTarget, track: Track? = nil) {
+        guard let track = track ?? current else { return }
+        let isCurrent = track.id == current?.id
+        Task {
+            do {
+                let res = try await self.api.createRule(target: target == .artist ? "artist" : "track",
+                                                        action: "block", track: track, sessionId: self.sessionId)
+                if target == .artist { ArtistSkips.reset(track.artist) }
+                self.app?.show(target == .artist ? "Артист «\(track.displayArtist)» скрыт" : "Трек скрыт")
+                if isCurrent {
+                    self.skip()
+                } else if !self.fixed, let q = res.playback?.queue {
+                    self.queue = q
+                }
+            } catch {
+                self.app?.show(error)
+            }
+        }
+    }
+
+    /// Early skips only count for the current session on the server. Three early skips of
+    /// the same artist in a row (no finished or liked track in between) make it play less
+    /// often for good — a soft rule, undone in Profile → Скрыто.
+    private func noteEarlySkip(_ track: Track) {
+        guard let artist = track.artist.nonEmpty, ArtistSkips.add(artist) == 3 else { return }
+        Task {
+            guard (try? await self.api.createRule(target: "artist", action: "downrank", track: track,
+                                                  sessionId: nil)) != nil else { return }
+            self.app?.show("«\(artist)» теперь будет звучать реже. Скрыть совсем — в меню трека")
+        }
+    }
+
     // MARK: - Loading
 
-    private func load(_ track: Track, autoplay: Bool) {
+    private func load(_ track: Track, autoplay: Bool, announce: Bool = true) {
+        let fadeLength = armedFadeLength(autoplay: autoplay)
+        crossfadeArmed = false
+        if fadeLength == nil { stopFadeNow() }
         generation += 1
         let gen = generation
         current = track
@@ -318,15 +552,27 @@ final class PlayerController: ObservableObject {
         lastPos = 0
         lastProgressAt = Date()
 
-        guard let url = api.streamURL(for: track) else { return }
-        var options: [String: Any] = [:]
-        let headers = api.authHeaders()
-        if !headers.isEmpty { options["AVURLAssetHTTPHeaderFieldsKey"] = headers }
-        let cookies = api.cookies(for: url)
-        if !cookies.isEmpty { options[AVURLAssetHTTPCookiesKey] = cookies }
-        let item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
+        let item: AVPlayerItem
+        if let local = offline.playableURL(track.id) {
+            // Saved or prefetched: plays even with no connection, starts instantly.
+            item = AVPlayerItem(url: local)
+        } else {
+            guard let url = api.streamURL(for: track) else { return }
+            var options: [String: Any] = [:]
+            let headers = api.authHeaders()
+            if !headers.isEmpty { options["AVURLAssetHTTPHeaderFieldsKey"] = headers }
+            let cookies = api.cookies(for: url)
+            if !cookies.isEmpty { options[AVURLAssetHTTPCookiesKey] = cookies }
+            item = AVPlayerItem(asset: AVURLAsset(url: url, options: options))
+        }
+        Equalizer.attach(to: item)
         observe(item, gen: gen)
-        player.replaceCurrentItem(with: item)
+        if let fadeLength {
+            startCrossfade(into: item, length: fadeLength)
+        } else {
+            player.replaceCurrentItem(with: item)
+        }
+        schedulePrefetch()
 
         nowPlayingArtwork = nil
         updateNowPlaying()
@@ -335,12 +581,13 @@ final class PlayerController: ObservableObject {
         if autoplay {
             activateAudioSession()
             player.play()
-            sendStart(track)
+            if announce { sendStart(track) }
         }
     }
 
     private func sendStart(_ track: Track) {
         startSent = true
+        guard !offlineMode else { return }
         Task { _ = try? await self.postEvent("track_start", track: track) }
     }
 
@@ -376,10 +623,16 @@ final class PlayerController: ObservableObject {
 
     private func playbackFailed(gen: Int, error: Error?) {
         guard gen == generation, let track = current else { return }
+        if !offlineMode, !networkUp || Self.isNetworkError(error) {
+            enterOfflineFallback()
+            return
+        }
         failStreak += 1
         app?.show("Не удалось воспроизвести «\(track.displayTitle)»")
         // Unsupported codec or a missing file: move on, but don't spin through a broken library.
-        if failStreak <= 3 {
+        if offlineMode {
+            offlineStep(+1)
+        } else if failStreak <= 3 {
             skip()
         } else {
             player.pause()
@@ -387,22 +640,7 @@ final class PlayerController: ObservableObject {
     }
 
     private func observePlayer() {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
-            let seconds = time.seconds
-            Task { @MainActor in self?.tick(seconds) }
-        }
-        statusObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
-            let status = player.timeControlStatus
-            Task { @MainActor in
-                guard let self else { return }
-                let playing = status != .paused
-                self.isBuffering = status == .waitingToPlayAtSpecifiedRate
-                if playing != self.isPlaying {
-                    self.isPlaying = playing
-                    self.updateNowPlaying()
-                }
-            }
-        }
+        attachObservers(to: player)
         interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] note in
             guard let info = note.userInfo,
                   let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -412,6 +650,118 @@ final class PlayerController: ObservableObject {
             else { return }
             Task { @MainActor in self?.resume() }
         }
+    }
+
+    private func attachObservers(to p: AVPlayer) {
+        timeObserver = p.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
+            let seconds = time.seconds
+            Task { @MainActor in self?.tick(seconds) }
+        }
+        timeObserverOwner = p
+        statusObservation = p.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] player, _ in
+            let status = player.timeControlStatus
+            Task { @MainActor in
+                guard let self else { return }
+                let playing = status != .paused
+                self.isBuffering = status == .waitingToPlayAtSpecifiedRate
+                if self.isBuffering { self.watchStall() } else { self.stallTask?.cancel() }
+                if playing != self.isPlaying {
+                    self.isPlaying = playing
+                    self.updateNowPlaying()
+                }
+            }
+        }
+    }
+
+    private func detachObservers() {
+        if let t = timeObserver { timeObserverOwner?.removeTimeObserver(t) }
+        timeObserver = nil
+        timeObserverOwner = nil
+        statusObservation = nil
+    }
+
+    // MARK: - Crossfade
+
+    /// Near the end of a track, start the transition early: the usual «track finished»
+    /// flow runs now, and `load` turns its start of the next track into a crossfade.
+    private func maybeStartCrossfade() {
+        guard settings.crossfadeEnabled, settings.crossfadeSeconds > 0,
+              !crossfadeArmed, !crossfading, !busy, !seeking, isPlaying,
+              let track = current, duration > 0 else { return }
+        let fade = Double(settings.crossfadeSeconds)
+        let left = duration - position
+        // a short track (or a short tail) is left alone; the fade is at most a quarter of it
+        guard duration >= fade * 4, left <= fade + 0.5, left > 1 else { return }
+        guard let next = upcomingTracks(1).first else { return }
+        if settings.crossfadeKeepAlbums, Self.sameAlbum(track, next) { return }
+        crossfadeArmed = true
+        trackFinished(gen: generation)
+    }
+
+    private static func sameAlbum(_ a: Track, _ b: Track) -> Bool {
+        guard let x = a.album.nonEmpty, let y = b.album.nonEmpty else { return false }
+        return x.caseInsensitiveCompare(y) == .orderedSame
+            && (a.artist.nonEmpty ?? "").caseInsensitiveCompare(b.artist.nonEmpty ?? "") == .orderedSame
+    }
+
+    /// Length of the overlap if the next track should fade in over the one still playing.
+    private func armedFadeLength(autoplay: Bool) -> Double? {
+        guard crossfadeArmed, autoplay, !crossfading, isPlaying, let item = player.currentItem else { return nil }
+        let total = item.duration.seconds
+        let at = player.currentTime().seconds
+        guard total.isFinite, at.isFinite, total - at > 0.8 else { return nil }
+        return min(Double(settings.crossfadeSeconds), total - at)
+    }
+
+    /// The new item starts silent on the spare player, which then becomes the active one;
+    /// the old player keeps playing its tail and fades out.
+    private func startCrossfade(into item: AVPlayerItem, length: Double) {
+        let outgoing = player
+        let incoming = spare
+        incoming.volume = 0
+        incoming.replaceCurrentItem(with: item)
+        incoming.play()
+        detachObservers()
+        spare = outgoing
+        player = incoming
+        attachObservers(to: incoming)
+        crossfading = true
+        fadeTask = Task { @MainActor [weak self] in
+            await self?.runFade(out: outgoing, into: incoming, length: length)
+        }
+    }
+
+    /// Equal-power curves. The outgoing track keeps full volume until the new one is
+    /// really playing, so a slow stream gives a plain cut, not silence.
+    private func runFade(out: AVPlayer, into incoming: AVPlayer, length: Double) async {
+        var waited = 0.0
+        while incoming.timeControlStatus != .playing, waited < 4 {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            waited += 0.05
+            if Task.isCancelled { return }
+        }
+        let started = Date()
+        while !Task.isCancelled {
+            let t = min(1, Date().timeIntervalSince(started) / max(length, 0.1))
+            out.volume = Float(cos(t * .pi / 2))
+            incoming.volume = Float(sin(t * .pi / 2))
+            if t >= 1 { break }
+            try? await Task.sleep(nanoseconds: 33_000_000)
+        }
+        if !Task.isCancelled { stopFadeNow() }
+    }
+
+    /// Ends a crossfade at once (pause, seek, skip, a new track): the outgoing track is
+    /// dropped and the active one goes back to full volume.
+    private func stopFadeNow() {
+        fadeTask?.cancel()
+        fadeTask = nil
+        guard crossfading else { return }
+        crossfading = false
+        spare.pause()
+        spare.replaceCurrentItem(with: nil)
+        spare.volume = 1
+        player.volume = 1
     }
 
     private func tick(_ seconds: Double) {
@@ -427,9 +777,12 @@ final class PlayerController: ObservableObject {
             lastProgressAt = Date()
             Task { _ = try? await self.postEvent("progress") }
         }
+        maybeStartCrossfade()
     }
 
     func stop(clearSession: Bool) {
+        crossfadeArmed = false
+        stopFadeNow()
         generation += 1
         requestSeq += 1
         player.pause()
@@ -444,6 +797,7 @@ final class PlayerController: ObservableObject {
         position = 0
         duration = 0
         busy = false
+        leaveOffline()
         if clearSession {
             sessionId = nil
             settings.sessionId = nil
@@ -455,8 +809,8 @@ final class PlayerController: ObservableObject {
 
     @discardableResult
     private func postEvent(_ type: String, track: Track? = nil, reason: String? = nil,
-                           retry: Bool = false) async throws -> EventResult? {
-        guard let sid = sessionId, let t = track ?? current else { return nil }
+                           retry: Bool = false, timeout: TimeInterval? = nil) async throws -> EventResult? {
+        guard !offlineMode, let sid = sessionId, let t = track ?? current else { return nil }
         let isCurrent = t.id == current?.id
         var body: [String: Any] = [
             "type": type,
@@ -473,15 +827,212 @@ final class PlayerController: ObservableObject {
         if let reason { body["reason"] = reason }
 
         let data: Data
+        let started = Date()
         do {
-            data = try await api.send("POST", "/api/events", body: body)
-        } catch let e as APIError where retry && e.status == 0 {
-            // Same event_id: the server deduplicates retries.
+            data = try await api.send("POST", "/api/events", body: body, timeout: timeout)
+        } catch let e as APIError where retry && e.status == 0 && Date().timeIntervalSince(started) < 3 {
+            // A quick failure (dropped connection) is worth one more try — same event_id,
+            // the server deduplicates. A slow one is not: that is a bad network, and
+            // waiting longer only means silence.
             _ = e
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            data = try await api.send("POST", "/api/events", body: body)
+            try await Task.sleep(nanoseconds: 500_000_000)
+            data = try await api.send("POST", "/api/events", body: body, timeout: timeout)
         }
         return try api.decode(EventResult.self, from: data)
+    }
+
+    // MARK: - Offline
+
+    /// Plays saved tracks from the phone («Сохранённые» tab); works with or without a connection.
+    func playOffline(_ tracks: [Track], startAt index: Int = 0, shuffle: Bool = false) {
+        var list = tracks
+        var start = index
+        if shuffle {
+            list.shuffle()
+            start = 0
+        }
+        guard list.indices.contains(start) else { return }
+        startOffline(list, at: start, fallback: false, name: "Сохранённые")
+    }
+
+    /// The server can't be reached mid-listening: continue with what is on the phone —
+    /// first the upcoming tracks already prefetched, then saved tracks in random order.
+    private func enterOfflineFallback(keepCurrent: Bool = false) {
+        guard !offlineMode else { return }
+        var list = upcomingTracks(3).filter { offline.playableURL($0.id) != nil }
+        var seen = Set(list.map(\.id))
+        if let id = current?.id { seen.insert(id) }
+        list += offline.savedTracks.map(\.track).filter { !seen.contains($0.id) }.shuffled()
+        guard !list.isEmpty else {
+            player.pause()
+            app?.show("Нет сети, а сохранённых треков пока нет")
+            return
+        }
+        if keepCurrent, let cur = current, offline.playableURL(cur.id) != nil {
+            // the track playing is already on the phone: let it play on, go offline after it
+            startOffline([cur] + list, at: 0, fallback: true, name: "Без сети · сохранённое", reload: false)
+        } else {
+            startOffline(list, at: 0, fallback: true, name: "Без сети · сохранённое")
+        }
+        app?.show("Нет сети — играю сохранённое")
+    }
+
+    private func startOffline(_ list: [Track], at index: Int, fallback: Bool, name: String, reload: Bool = true) {
+        stallTask?.cancel()
+        requestSeq += 1
+        busy = false
+        offlineMode = true
+        offlineFallback = fallback
+        offlineList = list
+        offlineIndex = index
+        fixed = true
+        playlist = list
+        queue = []
+        listName = name
+        if reload { load(list[index], autoplay: true) }
+        if fallback { startProbe() }
+    }
+
+    private func leaveOffline() {
+        probeTask?.cancel()
+        serverReachable = false
+        offlineMode = false
+        offlineFallback = false
+        offlineList = []
+        offlineIndex = 0
+    }
+
+    private func offlineStep(_ delta: Int) {
+        // Back online after an automatic switch: return to the radio at the track boundary.
+        if delta > 0, offlineFallback, serverReachable {
+            returnOnline()
+            return
+        }
+        var i = max(0, offlineIndex + delta)
+        if i >= offlineList.count {
+            guard offlineFallback, !offlineList.isEmpty else {
+                player.pause()
+                app?.show("Конец списка")
+                return
+            }
+            offlineList.shuffle()  // keep the music going until the network is back
+            playlist = offlineList
+            i = 0
+        }
+        offlineIndex = i
+        load(offlineList[i], autoplay: true)
+    }
+
+    private func returnOnline() {
+        let req = nextRequest()
+        Task {
+            defer { self.finish(req) }
+            do {
+                let payload: PlayPayload = try await self.api.post("/api/radio/start", [:])
+                guard req == self.requestSeq else { return }
+                self.app?.show("Сеть вернулась — снова онлайн-радио")
+                self.apply(payload, autoplay: true)
+            } catch {
+                guard req == self.requestSeq else { return }
+                // Not reachable after all: keep playing from the phone and keep checking.
+                self.serverReachable = false
+                self.startProbe()
+                self.offlineStep(+1)
+            }
+        }
+    }
+
+    /// Checks every 15 s whether the server answers again. Doesn't rely on NWPathMonitor
+    /// alone: Wi-Fi can be "up" while the server is out of reach, and the other way round.
+    private func startProbe() {
+        probeTask?.cancel()
+        probeTask = Task {
+            while !Task.isCancelled && self.offlineFallback && !self.serverReachable {
+                let started = Date()
+                if self.networkUp, await self.api.ping(), Date().timeIntervalSince(started) < 2.5 {
+                    guard !Task.isCancelled, self.offlineFallback else { return }
+                    self.serverReachable = true
+                    self.app?.show("Связь есть — после этого трека включу онлайн-радио")
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+            }
+        }
+    }
+
+    /// The next tracks of the current radio or list, as far as the client knows them.
+    private func upcomingTracks(_ n: Int) -> [Track] {
+        let next: [Track]
+        if fixed {
+            if let id = current?.id, let i = playlist.firstIndex(where: { $0.id == id }) {
+                next = Array(playlist.dropFirst(i + 1).prefix(n))
+            } else {
+                next = Array(playlist.prefix(n))
+            }
+        } else {
+            next = queue.prefix(n).map(\.asTrack)
+        }
+        return next.filter { $0.id != current?.id }
+    }
+
+    /// Downloads the next two tracks a few seconds after a track starts, so a dropped
+    /// connection at the track boundary doesn't stop the music.
+    private func schedulePrefetch() {
+        prefetchTask?.cancel()
+        guard !offlineMode, networkUp, settings.prefetchNext else { return }
+        prefetchTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard !Task.isCancelled, !self.offlineMode else { return }
+            self.offline.prefetch(self.upcomingTracks(2))
+        }
+    }
+
+    /// A streamed track stopped to buffer: with no network give up right away, on a bad
+    /// one after 15 s, and continue from the phone instead of a long silence.
+    private func watchStall() {
+        stallTask?.cancel()
+        guard !offlineMode, let id = current?.id, offline.playableURL(id) == nil else { return }
+        stallTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, self.isBuffering, !self.offlineMode else { return }
+            if !self.networkUp {
+                self.enterOfflineFallback()
+                return
+            }
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, self.isBuffering, !self.offlineMode else { return }
+            self.enterOfflineFallback()
+        }
+    }
+
+    private func observeNetwork() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let up = path.status == .satisfied
+            Task { @MainActor in self?.networkChanged(up) }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "musik.network"))
+    }
+
+    private func networkChanged(_ up: Bool) {
+        guard up != networkUp else { return }
+        networkUp = up
+        if up {
+            schedulePrefetch()
+            if offlineFallback { startProbe() }
+            Task { await self.app?.reconnect() }
+        } else if isBuffering {
+            watchStall()
+        }
+    }
+
+    nonisolated private static func isNetwork(_ error: Error) -> Bool {
+        (error as? APIError)?.status == 0 && (error as? APIError)?.code == "network"
+    }
+
+    nonisolated private static func isNetworkError(_ error: Error?) -> Bool {
+        guard let error else { return false }
+        if error is URLError { return true }
+        return (error as NSError).domain == NSURLErrorDomain
     }
 
     // MARK: - System integration
@@ -523,6 +1074,25 @@ final class PlayerController: ObservableObject {
         }
         c.skipForwardCommand.isEnabled = false
         c.skipBackwardCommand.isEnabled = false
+        // Like / dislike outside the app: lock screen, Control Center, CarPlay «Now Playing».
+        c.likeCommand.localizedTitle = "Нравится"
+        c.likeCommand.localizedShortTitle = "Нравится"
+        c.likeCommand.addTarget { [weak self] _ in
+            self?.like()
+            return .success
+        }
+        c.dislikeCommand.localizedTitle = "Не нравится, дальше"
+        c.dislikeCommand.localizedShortTitle = "Не нравится"
+        c.dislikeCommand.addTarget { [weak self] _ in
+            self?.dislikeAndSkip()
+            return .success
+        }
+    }
+
+    private func updateFeedbackCommands() {
+        let c = MPRemoteCommandCenter.shared()
+        c.likeCommand.isActive = isFavorite
+        c.dislikeCommand.isActive = disliked
     }
 
     private func updateNowPlaying() {
@@ -540,10 +1110,16 @@ final class PlayerController: ObservableObject {
         if let album = t.album.nonEmpty { info[MPMediaItemPropertyAlbumTitle] = album }
         if let art = nowPlayingArtwork { info[MPMediaItemPropertyArtwork] = art }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        updateFeedbackCommands()
     }
 
     private func loadNowPlayingArtwork(for track: Track) {
         artworkTask?.cancel()
+        if let img = offline.artwork(track.id) {
+            nowPlayingArtwork = Self.makeArtwork(img)
+            updateNowPlaying()
+            return
+        }
         guard let url = api.artworkURL(trackId: track.id, width: 640) else { return }
         artworkTask = Task {
             guard let img = await ImageLoader.shared.image(url),
@@ -557,4 +1133,37 @@ final class PlayerController: ObservableObject {
     nonisolated private static func makeArtwork(_ image: UIImage) -> MPMediaItemArtwork {
         MPMediaItemArtwork(boundsSize: image.size) { _ in image }
     }
+}
+
+/// Early skips in a row per artist, kept across launches (UserDefaults).
+@MainActor
+enum ArtistSkips {
+    private static let key = "artistEarlySkips"
+
+    private static func norm(_ artist: String) -> String {
+        artist.lowercased().trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Counts one more early skip and returns the new streak.
+    static func add(_ artist: String) -> Int {
+        var all = UserDefaults.standard.dictionary(forKey: key) as? [String: Int] ?? [:]
+        let n = (all[norm(artist)] ?? 0) + 1
+        all[norm(artist)] = n
+        UserDefaults.standard.set(all, forKey: key)
+        return n
+    }
+
+    static func reset(_ artist: String?) {
+        guard let artist = artist.nonEmpty else { return }
+        var all = UserDefaults.standard.dictionary(forKey: key) as? [String: Int] ?? [:]
+        guard all.removeValue(forKey: norm(artist)) != nil else { return }
+        UserDefaults.standard.set(all, forKey: key)
+    }
+}
+
+/// Playback position and duration, published separately from `PlayerController`.
+@MainActor
+final class PlaybackClock: ObservableObject {
+    @Published var position: Double = 0
+    @Published var duration: Double = 0
 }

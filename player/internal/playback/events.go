@@ -266,6 +266,26 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 			OK: true, IsRate: true, Rating: ev.Type, Flipped: prev != "",
 		}
 
+	case "undislike":
+		// «Снять дизлайк»: the dislike leaves the history, the counters and the taste.
+		undone, err := e.Store.RevertDislike(ev.TrackID)
+		if err != nil {
+			return EventResult{Error: err.Error()}
+		}
+		delete(sess.Rated, ev.TrackID)
+		if !undone {
+			return EventResult{OK: true, IsRate: true, Ignored: true, IgnoreReason: "no_dislike"}
+		}
+		if row, ok := e.Idx.RowOf(ev.TrackID); ok {
+			e.TasteState.RemoveDislike(e.Idx.Vector(row), -taste.DislikeWeight())
+			e.persistTasteState(db.DayPart(time.Now().Hour()))
+		}
+		if len(sess.DailyIDs) > 0 {
+			sess.UpdatedAt = time.Now()
+			e.persistLocked(sess)
+		}
+		return EventResult{OK: true, IsRate: true}
+
 	default:
 		return EventResult{Unknown: true}
 	}

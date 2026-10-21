@@ -24,7 +24,10 @@ final class ImageLoader: @unchecked Sendable {
         guard !known404, let api else { return nil }
         do {
             let data = try await api.data(from: url)
-            guard let img = UIImage(data: data) else { return nil }
+            // Decode here, off the main thread; otherwise the JPEG is decoded lazily on the
+            // first draw, which is what makes a scrolling list hitch.
+            guard let raw = UIImage(data: data) else { return nil }
+            let img = raw.preparingForDisplay() ?? raw
             cache.setObject(img, forKey: url as NSURL)
             return img
         } catch let e as APIError where e.isNotFound {
@@ -42,20 +45,43 @@ final class ImageLoader: @unchecked Sendable {
 }
 
 /// Square cover for a track id. Sizes follow the server buckets: 96 / 256 / 640.
+/// With `photo` (an artist's photo, see ArtistAvatar), that picture is shown and the
+/// track cover only when it cannot be loaded.
 struct ArtworkView: View {
     let trackId: Int?
     var size: Int = 256
     var fallback: String = "♪"
     var cornerRadius: CGFloat = 10
+    var photo: URL? = nil
 
     @State private var image: UIImage?
 
     var body: some View {
+        // A square frame first, the picture laid over it and clipped: a wide or tall
+        // cover (some files carry a whole collage) fills the square instead of
+        // stretching the row and spilling over the text next to it.
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay { content }
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+            .task(id: LoadKey(trackId: trackId, photo: photo)) { await load() }
+    }
+
+    private struct LoadKey: Hashable {
+        let trackId: Int?
+        let photo: URL?
+    }
+
+    @ViewBuilder
+    private var content: some View {
         ZStack {
             if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
+                    .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                    .clipped()
                     .transition(.opacity)
             } else {
                 LinearGradient(colors: Theme.placeholder(for: trackId ?? 0),
@@ -67,17 +93,32 @@ struct ArtworkView: View {
                     .padding(6)
             }
         }
-        .aspectRatio(1, contentMode: .fit)
-        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-        .task(id: trackId) {
-            image = nil
-            guard let trackId, let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
-            if let hit = ImageLoader.shared.cached(url) {
+    }
+
+    @MainActor private func load() async {
+        image = nil
+        if let photo {
+            if let hit = ImageLoader.shared.cached(photo) {
                 image = hit
                 return
             }
-            let loaded = await ImageLoader.shared.image(url)
-            withAnimation(.easeOut(duration: 0.25)) { image = loaded }
+            if let loaded = await ImageLoader.shared.image(photo) {
+                withAnimation(.easeOut(duration: 0.25)) { image = loaded }
+                return
+            }
         }
+        guard let trackId else { return }
+        if OfflineStore.shared.isSaved(trackId),
+           let local = await OfflineStore.savedArtwork(trackId, size: size) {
+            image = local
+            return
+        }
+        guard let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: size) else { return }
+        if let hit = ImageLoader.shared.cached(url) {
+            image = hit
+            return
+        }
+        let loaded = await ImageLoader.shared.image(url)
+        withAnimation(.easeOut(duration: 0.25)) { image = loaded }
     }
 }

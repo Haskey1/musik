@@ -643,3 +643,44 @@ func TestNewSessionIDUniqueWithinOneClockTick(t *testing.T) {
 		seen[id] = true
 	}
 }
+
+func TestUndislikeRestoresTasteAndHistory(t *testing.T) {
+	engine := testEngine(t)
+	insertPlaybackTracks(t, engine)
+	session := engine.StartRadio(nil)
+	session.Lock()
+	defer session.Unlock()
+	engine.ApplyEvent(session, Event{
+		Type: "track_start", EventID: "s", TrackID: session.Current,
+		ImpressionID: session.CurrentItem.ImpressionID,
+	})
+	engine.ApplyEvent(session, Event{
+		Type: "dislike", EventID: "d", TrackID: session.Current,
+		ImpressionID: session.CurrentItem.ImpressionID,
+	})
+	if len(engine.TasteState.PersistentNegatives()) == 0 {
+		t.Fatal("dislike should create a persistent negative prototype")
+	}
+	res := engine.ApplyEvent(session, Event{Type: "undislike", EventID: "u", TrackID: session.Current})
+	if !res.OK || res.Ignored || res.Error != "" {
+		t.Fatalf("undislike failed: %+v", res)
+	}
+	if n := len(engine.TasteState.PersistentNegatives()); n != 0 {
+		t.Fatalf("undislike left %d negative prototypes", n)
+	}
+	if _, rated := session.Rated[session.Current]; rated {
+		t.Fatal("undislike should clear the session rating")
+	}
+	again := engine.ApplyEvent(session, Event{Type: "undislike", EventID: "u2", TrackID: session.Current})
+	if !again.Ignored {
+		t.Fatalf("second undislike should be ignored: %+v", again)
+	}
+	// the track can be disliked again afterwards
+	redo := engine.ApplyEvent(session, Event{
+		Type: "dislike", EventID: "d2", TrackID: session.Current,
+		ImpressionID: session.CurrentItem.ImpressionID,
+	})
+	if redo.Ignored || redo.Error != "" {
+		t.Fatalf("dislike after undo: %+v", redo)
+	}
+}

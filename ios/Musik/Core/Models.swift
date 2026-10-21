@@ -7,6 +7,8 @@ import Foundation
 struct Track: Decodable, Identifiable, Hashable {
     var id: Int
     var artist: String?
+    /// Credited artists split by the server ('Thomas / БИ-2 / Сплин'); library rows only.
+    var artists: [String]?
     var title: String?
     var album: String?
     var duration: Double?
@@ -57,6 +59,20 @@ struct PlayPayload: Decodable {
     var fixed: Bool?
     var maturity: String?
 }
+
+/// A radio rule: hide (block) or play less often (downrank) a track or an artist.
+struct RadioRule: Decodable, Identifiable, Hashable {
+    var ruleId: String
+    var targetType: String
+    var action: String
+    var targetKey: String
+    var expiresAt: String?
+    var id: String { ruleId }
+}
+
+struct RulesResponse: Decodable { var rules: [RadioRule] }
+
+struct RuleCreated: Decodable { var playback: PlayPayload? }
 
 /// Response of POST /api/events. `current` is a bare id here, so it is not decoded.
 struct EventResult: Decodable {

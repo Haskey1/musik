@@ -139,6 +139,45 @@ func addNegative(prototypes []NegativePrototype, vector []float32, weight float6
 	return append(prototypes[:lightest], prototypes[lightest+1:]...)
 }
 
+// RemoveDislike undoes AddDislike for the same track: it takes the weight back out of
+// the nearest persistent negative prototype (the one the dislike was merged into) and
+// drops the prototype when nothing is left of it.
+func (s *State) RemoveDislike(vector []float32, weight float64) {
+	if len(vector) == 0 || weight <= 0 {
+		return
+	}
+	v := append([]float32(nil), vector...)
+	index.Normalize(v)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	best, bestSimilarity := -1, float32(-1)
+	for i := range s.Persistent {
+		if sim := dot(s.Persistent[i].Vector, v); sim > bestSimilarity {
+			best, bestSimilarity = i, sim
+		}
+	}
+	if best >= 0 && bestSimilarity >= 0.82 {
+		p := &s.Persistent[best]
+		left := p.Mass - weight
+		if left <= 1e-6 || p.Samples <= 1 {
+			s.Persistent = append(s.Persistent[:best], s.Persistent[best+1:]...)
+		} else {
+			for i := range p.Vector {
+				p.Vector[i] = float32((float64(p.Vector[i])*p.Mass - float64(v[i])*weight) / left)
+			}
+			index.Normalize(p.Vector)
+			p.Mass = left
+			p.Samples--
+			p.UpdatedAt = time.Now().UTC()
+		}
+	}
+	s.Long.mu.Lock()
+	if s.Long.NNegative > 0 {
+		s.Long.NNegative--
+	}
+	s.Long.mu.Unlock()
+}
+
 // AddEarlySkip affects only the current listening session.
 func (s *State) AddEarlySkip(session *SessionState, vector []float32, weight float64) {
 	if session == nil {
