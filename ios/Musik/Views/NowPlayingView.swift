@@ -97,21 +97,6 @@ struct NowPlayingView: View {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold))
             }
             Spacer()
-            VStack(spacing: 2) {
-                Text(player.listName ?? (player.fixed ? "Плейлист" : "Радио"))
-                    .font(.subheadline.weight(.semibold))
-                    .lineLimit(1)
-                if player.offlineMode {
-                    Label("офлайн · с телефона", systemImage: "wifi.slash")
-                        .font(.caption2)
-                        .foregroundStyle(Color.white)
-                } else {
-                    Text(Labels.maturity(player.maturity))
-                        .font(.caption2)
-                        .foregroundStyle(Color.white.opacity(0.8))
-                }
-            }
-            Spacer()
             if let track = player.current {
                 if let url = app.shareURL(track: track) {
                     SwiftUI.ShareLink(item: url) {
@@ -142,6 +127,26 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
+        // the title sits in the middle of the screen whatever the buttons on the sides are
+        .overlay(alignment: .center) {
+            VStack(spacing: 2) {
+                Text(player.listName ?? (player.fixed ? "Плейлист" : "Радио"))
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                if player.offlineMode {
+                    Label("офлайн · с телефона", systemImage: "wifi.slash")
+                        .font(.caption2)
+                        .foregroundStyle(Color.white)
+                } else {
+                    Text(Labels.maturity(player.maturity))
+                        .font(.caption2)
+                        .foregroundStyle(Color.white.opacity(0.8))
+                        .lineLimit(1)
+                }
+            }
+            .padding(.top, 16)
+            .padding(.horizontal, 110)
+        }
     }
 
     private func titleBlock(_ track: Track) -> some View {
@@ -443,11 +448,13 @@ struct LyricsView: View {
 
 /// ♥ in the player: a fresh like makes the heart beat and fill with scarlet.
 private struct LikeChip: View {
+    @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
     @State private var beat = false
 
     var body: some View {
-        let liked = player.isFavorite
+        // read from AppState so an unlike (no player update follows it) redraws the heart
+        let liked = player.current.map { app.favoriteTracks.contains($0.id) } ?? false
         Button {
             if !liked { pulse() }
             player.like()
