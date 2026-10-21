@@ -22,6 +22,7 @@ struct NowPlayingView: View {
         ZStack {
             CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
+                ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 22) {
                         topBar
@@ -35,16 +36,26 @@ struct NowPlayingView: View {
                         titleBlock(track)
                         SeekBar()
                         transport
-                        actions(track)
-                        Picker("", selection: $pane) {
-                            ForEach(Pane.allCases) { Text($0.rawValue).tag($0) }
+                        actions(track) {
+                            // «Текст» swaps the queue below for the lyrics and scrolls to them
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                pane = pane == .lyrics ? .queue : .lyrics
+                            }
+                            if pane == .lyrics {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    withAnimation(.easeInOut(duration: 0.35)) {
+                                        scroller.scrollTo("pane", anchor: .top)
+                                    }
+                                }
+                            }
                         }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal, 20)
-                        switch pane {
-                        case .queue: upNext
-                        case .lyrics: LyricsView(trackId: track.id)
+                        Group {
+                            switch pane {
+                            case .queue: upNext
+                            case .lyrics: LyricsView(trackId: track.id)
+                            }
                         }
+                        .id("pane")
                         // quiet, at the very bottom — as in Yandex Music
                         HStack {
                             Spacer()
@@ -63,6 +74,7 @@ struct NowPlayingView: View {
                     .padding(.bottom, 32)
                 }
                 .scrollDisabled(swiping)
+                }
             } else {
                 VStack(spacing: 12) {
                     Text("Ничего не играет").font(.title3.weight(.semibold))
@@ -101,6 +113,13 @@ struct NowPlayingView: View {
             }
             Spacer()
             if let track = player.current {
+                if let url = app.shareURL(track: track) {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up").font(.title3)
+                    }
+                    .padding(.trailing, 14)
+                    .accessibilityLabel("Поделиться")
+                }
                 Menu {
                     Button { showEqualizer = true } label: {
                         Label("Эквалайзер", systemImage: "slider.horizontal.3")
@@ -193,10 +212,8 @@ struct NowPlayingView: View {
     }
 
     /// Two rows under the transport: rate / save, then explore.
-    private func actions(_ track: Track) -> some View {
-        let artist = track.artist.nonEmpty
-        let artistFav = artist.map { app.favoriteArtists.contains($0) } ?? false
-        return VStack(spacing: 10) {
+    private func actions(_ track: Track, onLyrics: @escaping () -> Void) -> some View {
+        VStack(spacing: 10) {
             HStack(spacing: 10) {
                 Button { player.like() } label: {
                     Image(systemName: player.isFavorite ? "heart.fill" : "heart")
@@ -207,7 +224,7 @@ struct NowPlayingView: View {
 
                 // a second tap takes the dislike back
                 Button { player.disliked ? player.undislike() : player.dislike() } label: {
-                    Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    Image(systemName: player.disliked ? "heart.slash.fill" : "heart.slash")
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle(active: player.disliked))
@@ -234,13 +251,10 @@ struct NowPlayingView: View {
                 }
                 .buttonStyle(GlassChipStyle())
 
-                Button {
-                    if let artist { Task { await app.toggleFavoriteArtist(artist) } }
-                } label: {
-                    Label("Артист", systemImage: artistFav ? "heart.fill" : "heart").frame(maxWidth: .infinity)
+                Button(action: onLyrics) {
+                    Label("Текст", systemImage: "quote.bubble").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(GlassChipStyle(active: artistFav))
-                .disabled(artist == nil)
+                .buttonStyle(GlassChipStyle(active: pane == .lyrics))
 
                 Button { player.startRadio(seed: track.id) } label: {
                     Label("Радио", systemImage: "dot.radiowaves.left.and.right").frame(maxWidth: .infinity)
@@ -265,7 +279,7 @@ struct NowPlayingView: View {
                     }
                 }
             } else {
-                Text("Дальше в радио · нажми — сразу она")
+                Text("Дальше в радио")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Color.white.opacity(0.7))
                 ForEach(Array(player.queue.enumerated()), id: \.offset) { i, item in

@@ -78,6 +78,13 @@ struct ArtistDetailView: View {
         .coordinateSpace(name: ArtistHero.coordinateSpace)
         .ignoresSafeArea(edges: photo != nil ? .top : [])
         .background(Theme.backdrop)
+        .toolbar {
+            if let url = app.shareURL(artist: artist) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                }
+            }
+        }
         .navigationTitle(photo == nil || collapsed ? artist : "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(photo == nil ? .automatic : (collapsed ? .visible : .hidden), for: .navigationBar)
@@ -148,6 +155,13 @@ struct AlbumDetailView: View {
             .padding(.bottom, 24)
         }
         .background(Theme.backdrop)
+        .toolbar {
+            if let url = app.shareURL(artist: artist ?? tracks.first?.artist, album: album) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                }
+            }
+        }
         .navigationTitle(album)
         .navigationBarTitleDisplayMode(.inline)
         .task {

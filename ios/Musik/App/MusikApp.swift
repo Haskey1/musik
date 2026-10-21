@@ -13,6 +13,7 @@ struct MusikApp: App {
                 .environmentObject(app.offline)
                 .preferredColorScheme(.dark)
                 .tint(Theme.accent)
+                .onOpenURL { app.open($0) }
         }
     }
 }
@@ -70,6 +71,8 @@ struct MainView: View {
                 .environmentObject(app.offline)
                 .presentationDragIndicator(.visible)
         }
+        .onAppear { openPendingLink() }
+        .onChange(of: app.pendingLink) { _ in openPendingLink() }
         .onChange(of: app.pendingRoute) { route in
             guard let route else { return }
             app.pendingRoute = nil
@@ -78,6 +81,20 @@ struct MainView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                 paths[selection].append(route)
             }
+        }
+    }
+
+    /// A shared link: a track starts playing with the player open; an artist or an album
+    /// is pushed onto the current tab.
+    private func openPendingLink() {
+        guard let link = app.pendingLink else { return }
+        app.pendingLink = nil
+        switch link {
+        case .track(let id):
+            player.play(["track_id": id])
+            showPlayer = true
+        case .route(let route):
+            app.pendingRoute = route
         }
     }
 

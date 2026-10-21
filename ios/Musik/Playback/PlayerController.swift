@@ -199,6 +199,8 @@ final class PlayerController: ObservableObject {
         guard current == nil, let sid = settings.sessionId else { return }
         do {
             let payload: PlayPayload = try await api.get("/api/now", query: [URLQueryItem(name: "session_id", value: sid)])
+            // something else (a shared link) started playing while we were asking
+            guard current == nil, requestSeq == 0 else { return }
             setSession(sid)
             apply(payload, autoplay: false)
         } catch let e as APIError where e.isNotFound {

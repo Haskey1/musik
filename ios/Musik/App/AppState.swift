@@ -19,6 +19,13 @@ final class AppState: ObservableObject {
     @Published var pendingRoute: Route?
     /// Started without a connection to the server: only saved tracks are available.
     @Published var offlineLaunch = false
+    /// A shared link (musik://…) waiting for the main screen to open it.
+    @Published var pendingLink: DeepLink?
+
+    enum DeepLink: Equatable {
+        case track(Int)
+        case route(Route)
+    }
 
     let settings: Settings
     let api: APIClient
@@ -40,6 +47,48 @@ final class AppState: ObservableObject {
         AppToast.app = self
         player.app = self
         api.onUnauthorized = { [weak self] in self?.handleUnauthorized() }
+    }
+
+    // MARK: Share links
+
+    /// musik://track/42, musik://artist?name=…, musik://album?artist=…&album=…
+    /// (the server's /open/… page hands its links over in this form).
+    func open(_ url: URL) {
+        guard url.scheme?.lowercased() == "musik" else { return }
+        let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first { $0.name == name }?.value.nonEmpty }
+        switch url.host?.lowercased() {
+        case "track":
+            if let id = Int(url.lastPathComponent) { pendingLink = .track(id) }
+        case "artist":
+            if let name = value("name") { pendingLink = .route(.artist(name)) }
+        case "album":
+            if let album = value("album") { pendingLink = .route(.album(artist: value("artist"), album: album)) }
+        default:
+            break
+        }
+    }
+
+    func shareURL(track: Track) -> URL? {
+        var items: [URLQueryItem] = [.init(name: "t", value: track.displayTitle)]
+        if let artist = track.artist.nonEmpty { items.append(.init(name: "a", value: artist)) }
+        return shareURL("track/\(track.id)", items)
+    }
+
+    func shareURL(artist: String) -> URL? {
+        shareURL("artist", [.init(name: "name", value: artist)])
+    }
+
+    func shareURL(artist: String?, album: String) -> URL? {
+        var items: [URLQueryItem] = [.init(name: "album", value: album)]
+        if let artist = artist.nonEmpty { items.append(.init(name: "artist", value: artist)) }
+        return shareURL("album", items)
+    }
+
+    private func shareURL(_ path: String, _ items: [URLQueryItem]) -> URL? {
+        guard var c = URLComponents(string: settings.baseURL + "/open/" + path) else { return nil }
+        c.queryItems = items
+        return c.url
     }
 
     // MARK: Boot & auth
