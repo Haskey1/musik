@@ -165,6 +165,12 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 			}
 		}
 		if !lifecycle.LifecycleChanged {
+			if lifecycle.AlreadyClosed {
+				return EventResult{
+					OK: true, IsEnd: true, Ignored: true, IgnoreReason: "already_closed",
+					NextID: sess.Current,
+				}
+			}
 			nextID := e.Advance(sess)
 			return EventResult{
 				OK: true, IsEnd: true, Ignored: true, IgnoreReason: "already_closed",
@@ -192,6 +198,7 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		if outcome == "early_skip" {
 			_ = e.Store.BumpRecStats(ev.TrackID, 0, 1, 0)
 			e.Idx.BumpSkipEarlyLocal(ev.TrackID)
+			e.noteClusterSkip(sess, ev.TrackID)
 		}
 		if outcome == "finished" {
 			_ = e.Store.BumpRecStats(ev.TrackID, 0, 0, 1)
@@ -258,6 +265,26 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		return EventResult{
 			OK: true, IsRate: true, Rating: ev.Type, Flipped: prev != "",
 		}
+
+	case "undislike":
+		// «Снять дизлайк»: the dislike leaves the history, the counters and the taste.
+		undone, err := e.Store.RevertDislike(ev.TrackID)
+		if err != nil {
+			return EventResult{Error: err.Error()}
+		}
+		delete(sess.Rated, ev.TrackID)
+		if !undone {
+			return EventResult{OK: true, IsRate: true, Ignored: true, IgnoreReason: "no_dislike"}
+		}
+		if row, ok := e.Idx.RowOf(ev.TrackID); ok {
+			e.TasteState.RemoveDislike(e.Idx.Vector(row), -taste.DislikeWeight())
+			e.persistTasteState(db.DayPart(time.Now().Hour()))
+		}
+		if len(sess.DailyIDs) > 0 {
+			sess.UpdatedAt = time.Now()
+			e.persistLocked(sess)
+		}
+		return EventResult{OK: true, IsRate: true}
 
 	default:
 		return EventResult{Unknown: true}

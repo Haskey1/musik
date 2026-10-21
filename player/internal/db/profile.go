@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"fmt"
 	"time"
 )
 
@@ -49,6 +50,7 @@ SELECT
     ELSE 0 END), 0),
   COALESCE(SUM(CASE
     WHEN action IN ('dislike','skip') THEN 1
+    WHEN action = 'undislike' THEN -1
     WHEN action = 'track_end' AND reason = 'skipped' AND COALESCE(listened_sec,0) < 0.3 * COALESCE(duration_sec,1) THEN 1
     ELSE 0 END), 0)
 FROM listening_history WHERE profile_id = ?`, s.ProfileID).Scan(&pos, &neg)
@@ -150,18 +152,23 @@ type TasteCentroidRow struct {
 	AlgorithmVersion string
 }
 
-func (s *Store) ReplaceTasteCentroids(rows []TasteCentroidRow) error {
-	if len(rows) == 0 {
-		return nil
+// ReplaceTasteCentroids replaces one algorithm version for this profile.
+// An empty list deletes that version so a vanished sample cannot leave
+// stale centroids in scoring.
+func (s *Store) ReplaceTasteCentroids(algorithmVersion string, rows []TasteCentroidRow) error {
+	if algorithmVersion == "" {
+		return fmt.Errorf("algorithm version required")
 	}
-	version := rows[0].AlgorithmVersion
 	tx, err := s.DB.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = tx.Exec(`DELETE FROM taste_centroids WHERE profile_id = ? AND algorithm_version = ?`, s.ProfileID, version); err != nil {
+	if _, err = tx.Exec(`DELETE FROM taste_centroids WHERE profile_id = ? AND algorithm_version = ?`, s.ProfileID, algorithmVersion); err != nil {
 		return err
+	}
+	if len(rows) == 0 {
+		return tx.Commit()
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	stmt, err := tx.Prepare(`
@@ -175,7 +182,7 @@ INSERT INTO taste_centroids(
 	for _, row := range rows {
 		if _, err = stmt.Exec(
 			row.Index, row.Vector, row.EmbeddingDim, row.Mass, nullStr(row.Label),
-			row.SampleCount, now, row.AlgorithmVersion, s.ProfileID,
+			row.SampleCount, now, algorithmVersion, s.ProfileID,
 		); err != nil {
 			return err
 		}

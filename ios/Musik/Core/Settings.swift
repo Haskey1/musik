@@ -9,8 +9,14 @@ final class Settings: @unchecked Sendable {
 
     private let defaults = UserDefaults.standard
 
+    /// Server address built into the app (Info.plist `MusikServerURL`); empty when none.
+    static let builtInServer: String = {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "MusikServerURL") as? String ?? ""
+        return raw.hasPrefix("$(") ? "" : normalize(raw)
+    }()
+
     var baseURL: String {
-        get { defaults.string(forKey: "baseURL") ?? "" }
+        get { defaults.string(forKey: "baseURL").nonEmpty ?? Settings.builtInServer }
         set { defaults.set(Settings.normalize(newValue), forKey: "baseURL") }
     }
 
@@ -31,6 +37,30 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "mobileStream") }
     }
 
+    /// Download the next couple of tracks ahead of time (keeps the music going when the
+    /// connection drops at a track boundary); off = stream only what plays now.
+    var prefetchNext: Bool {
+        get { defaults.object(forKey: "prefetchNext") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "prefetchNext") }
+    }
+
+    /// Crossfade between tracks: on/off, length in seconds, and whether tracks of one
+    /// album are left gapless.
+    var crossfadeEnabled: Bool {
+        get { defaults.object(forKey: "crossfadeEnabled") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "crossfadeEnabled") }
+    }
+
+    var crossfadeSeconds: Int {
+        get { min(12, max(1, defaults.object(forKey: "crossfadeSeconds") as? Int ?? 6)) }
+        set { defaults.set(min(12, max(1, newValue)), forKey: "crossfadeSeconds") }
+    }
+
+    var crossfadeKeepAlbums: Bool {
+        get { defaults.object(forKey: "crossfadeKeepAlbums") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "crossfadeKeepAlbums") }
+    }
+
     /// Stable per-install id sent with playback events.
     var clientId: String {
         if let id = defaults.string(forKey: "clientId") { return id }
@@ -47,7 +77,12 @@ final class Settings: @unchecked Sendable {
     static func normalize(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         while s.hasSuffix("/") { s.removeLast() }
-        if !s.isEmpty && !s.contains("://") { s = "http://" + s }
+        if !s.isEmpty && !s.contains("://") {
+            // A domain is served over HTTPS; a LAN IP or an explicit port (…:8787) is plain HTTP.
+            let host = s.split(separator: "/").first.map(String.init) ?? s
+            let isIP = host.split(separator: ":").first.map { $0.allSatisfy { $0.isNumber || $0 == "." } } ?? false
+            s = (isIP || host.contains(":") ? "http://" : "https://") + s
+        }
         return s
     }
 }

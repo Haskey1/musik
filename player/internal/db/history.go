@@ -193,32 +193,6 @@ INSERT INTO recommendation_impressions(
 	return tx.Commit()
 }
 
-// InsertRecommendationImpressions is retained for internal compatibility. New
-// playback code should call CreateRecommendationRequest so request provenance
-// and lifecycle closure are never omitted.
-func (s *Store) InsertRecommendationImpressions(items []RecommendationImpression) error {
-	if len(items) == 0 {
-		return nil
-	}
-	requestID := NewID()
-	for i := range items {
-		if items[i].ImpressionID == "" {
-			items[i].ImpressionID = NewID()
-		}
-		items[i].RequestID = requestID
-		if items[i].Source == "" {
-			items[i].Source = "exploit"
-			if items[i].Explore {
-				items[i].Source = "explore"
-			}
-		}
-	}
-	return s.CreateRecommendationRequest(RecommendationRequest{
-		RequestID: requestID, SessionID: items[0].SessionID, Reason: "compat",
-		PolicyVersion: "legacy-go-compat", CandidateCount: len(items),
-	}, items, nil)
-}
-
 type ImpressionRef struct {
 	ImpressionID string
 	RequestID    string
@@ -291,6 +265,10 @@ type LifecycleEvent struct {
 type LifecycleResult struct {
 	Inserted         bool
 	LifecycleChanged bool
+	// AlreadyClosed is true when this event did not win the lifecycle
+	// transition because the impression was already closed, or an earlier
+	// track_end/skip for it is already stored.
+	AlreadyClosed bool
 }
 
 // ApplyLifecycleEvent appends an event exactly once and conditionally advances
@@ -357,6 +335,9 @@ WHERE profile_id=? AND impression_id=? AND session_id=? AND track_id=? AND legac
 			if err == nil {
 				out.LifecycleChanged, _ = changed(result)
 			}
+			if err == nil && !out.LifecycleChanged {
+				out.AlreadyClosed, err = s.impressionAlreadyClosed(tx, ev)
+			}
 		} else if err == nil {
 			var prior int
 			err = tx.QueryRow(`
@@ -364,6 +345,7 @@ SELECT COUNT(*) FROM listening_history
 WHERE profile_id=? AND session_id=? AND track_id=? AND action IN ('track_end','skip') AND event_id!=?`,
 				s.ProfileID, ev.SessionID, ev.TrackID, ev.EventID).Scan(&prior)
 			out.LifecycleChanged = err == nil && prior == 0
+			out.AlreadyClosed = err == nil && prior > 0
 		}
 		if err == nil && out.LifecycleChanged {
 			finish, partial, early := 0, 0, 0
@@ -431,6 +413,76 @@ ON CONFLICT(profile_id,track_id) DO UPDATE SET
 		return LifecycleResult{}, err
 	}
 	return out, nil
+}
+
+// impressionAlreadyClosed reports whether this end/skip lost because the
+// impression was already closed or an earlier end/skip for it is stored.
+// The current event row is excluded: it was inserted in this transaction.
+func (s *Store) impressionAlreadyClosed(tx *Tx, ev LifecycleEvent) (bool, error) {
+	var closed int
+	err := tx.QueryRow(`
+SELECT CASE WHEN closed_at IS NOT NULL OR outcome != 'pending' THEN 1 ELSE 0 END
+FROM recommendation_impressions
+WHERE profile_id=? AND impression_id=? AND session_id=? AND track_id=? AND legacy=0`,
+		s.ProfileID, ev.ImpressionID, ev.SessionID, ev.TrackID).Scan(&closed)
+	if errors.Is(err, sql.ErrNoRows) {
+		closed = 0
+		err = nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var prior int
+	if err := tx.QueryRow(`
+SELECT COUNT(*) FROM listening_history
+WHERE profile_id=? AND impression_id=? AND action IN ('track_end','skip') AND event_id!=?`,
+		s.ProfileID, ev.ImpressionID, ev.EventID).Scan(&prior); err != nil {
+		return false, err
+	}
+	return closed > 0 || prior > 0, nil
+}
+
+// RevertDislike takes back the newest dislike of a track. listening_history is
+// append-only, so the dislike row stays and an 'undislike' event is recorded
+// after it; the track's dislike counter goes down by one. It reports whether
+// there was a dislike to undo (false when the newest of the two is already an undo).
+func (s *Store) RevertDislike(trackID int64) (bool, error) {
+	tx, err := s.DB.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var action, eventID string
+	var sessionID sql.NullString
+	err = tx.QueryRow(`
+SELECT action, COALESCE(event_id, CAST(id AS TEXT)), session_id FROM listening_history
+WHERE profile_id=? AND track_id=? AND action IN ('dislike','undislike')
+ORDER BY ts DESC, id DESC LIMIT 1`, s.ProfileID, trackID).Scan(&action, &eventID, &sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if action != "dislike" {
+		return false, nil
+	}
+	now := time.Now().UTC()
+	nowText := now.Format(time.RFC3339Nano)
+	if _, err = tx.Exec(`
+INSERT INTO listening_history(
+  profile_id, track_id, ts, action, daypart, weekday, session_id, reason, event_id
+) VALUES (?,?,?,'undislike',?,?,?,'undo',?)`,
+		s.ProfileID, trackID, nowText, dayPart(now.Hour()), mondayZeroWeekday(now.Weekday()),
+		sessionID, "undo:"+eventID); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(`
+UPDATE track_stats SET dislikes = CASE WHEN dislikes > 0 THEN dislikes-1 ELSE 0 END, updated_at=?
+WHERE profile_id=? AND track_id=?`, nowText, s.ProfileID, trackID); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 func changed(result sql.Result) (bool, error) {

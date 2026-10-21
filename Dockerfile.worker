@@ -19,6 +19,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Same default ranker the Go player embeds. Mix generation reads it from the
 # repo layout; without this copy the worker only has src/ and fails with Errno 2.
 COPY player/internal/queue/model_default.json /app/player/internal/queue/model_default.json
+COPY player/internal/queue/ranker_spec.json /app/player/internal/queue/ranker_spec.json
+# The shelf registry: a rescan or mix_pack queued without a payload (cron, scripts,
+# musik-extras) reads it from here, or fails with "mixes.json was not found".
+COPY player/internal/playback/mixes.json /app/player/internal/playback/mixes.json
 ENV MUSIK_LIBRARY=/music \
     MUSIK_DATA_DIR=/data \
     MUSIK_EMBEDDINGS_CACHE=/data/cache/embeddings \

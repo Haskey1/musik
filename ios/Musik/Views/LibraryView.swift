@@ -2,6 +2,7 @@ import SwiftUI
 
 struct LibraryView: View {
     enum Segment: String, CaseIterable, Identifiable {
+        case all = "Все"
         case tracks = "Треки"
         case artists = "Артисты"
         case albums = "Альбомы"
@@ -12,7 +13,7 @@ struct LibraryView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
 
-    @State private var segment: Segment = .tracks
+    @State private var segment: Segment = .all
     @State private var query = ""
     @State private var tracks: [Track] = []
     @State private var artists: [ArtistItem] = []
@@ -34,6 +35,7 @@ struct LibraryView: View {
             }
 
             switch segment {
+            case .all: allSection
             case .tracks: tracksSection
             case .artists: artistsSection
             case .albums: albumsSection
@@ -66,46 +68,104 @@ struct LibraryView: View {
 
     @ViewBuilder
     private var artistsSection: some View {
-        ForEach(artists.filter { matches($0.artist) }) { a in
-            NavigationLink(value: Route.artist(a.artist)) {
-                HStack(spacing: 12) {
-                    ArtworkView(trackId: a.coverTrackId, size: 96, fallback: a.artist, cornerRadius: 22)
-                        .frame(width: 44, height: 44)
-                    VStack(alignment: .leading) {
-                        Text(a.artist).lineLimit(1)
-                        Text("\(a.tracks ?? 0) треков").font(.caption).foregroundStyle(Theme.muted)
-                    }
-                    Spacer()
-                    if app.favoriteArtists.contains(a.artist) {
-                        Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
-                    }
+        ForEach(artists.filter { matches($0.artist) }) { artistRow($0) }
+    }
+
+    @ViewBuilder
+    private var albumsSection: some View {
+        ForEach(albums.filter { matches($0.album) || matches($0.artist ?? "") }) { albumRow($0) }
+    }
+
+    /// «Все»: one search over artists, albums and tracks. Each block is a short preview
+    /// with a button to the full list of that kind (the query stays in the search field).
+    @ViewBuilder
+    private var allSection: some View {
+        let foundArtists = artists.filter { matches($0.artist) }
+        let foundAlbums = albums.filter { matches($0.album) || matches($0.artist ?? "") }
+        let foundTracks = filteredTracks
+        let limit = query.trimmingCharacters(in: .whitespaces).isEmpty ? 5 : 8
+        if !foundArtists.isEmpty {
+            Section {
+                ForEach(foundArtists.prefix(limit)) { artistRow($0) }
+                showAll("Все артисты", count: foundArtists.count, shown: limit, segment: .artists)
+            } header: { allHeader("Артисты") }
+        }
+        if !foundAlbums.isEmpty {
+            Section {
+                ForEach(foundAlbums.prefix(limit)) { albumRow($0) }
+                showAll("Все альбомы", count: foundAlbums.count, shown: limit, segment: .albums)
+            } header: { allHeader("Альбомы") }
+        }
+        if !foundTracks.isEmpty {
+            Section {
+                let shown = Array(foundTracks.prefix(limit * 2))
+                ForEach(Array(shown.enumerated()), id: \.element.id) { i, t in
+                    TrackRow(track: t) { playFromLibrary(shown, at: i) }
+                        .listRowBackground(Color.clear)
                 }
+                showAll("Все треки", count: foundTracks.count, shown: limit * 2, segment: .tracks)
+            } header: { allHeader("Треки") }
+        }
+        if loaded && foundArtists.isEmpty && foundAlbums.isEmpty && foundTracks.isEmpty {
+            EmptyHint(text: query.isEmpty ? "Библиотека пуста" : "Ничего не найдено").listRowBackground(Color.clear)
+        }
+    }
+
+    private func allHeader(_ title: String) -> some View {
+        Text(title).font(.title3.weight(.bold)).foregroundStyle(Color.primary).textCase(nil)
+    }
+
+    @ViewBuilder
+    private func showAll(_ title: String, count: Int, shown: Int, segment target: Segment) -> some View {
+        if count > shown {
+            Button { segment = target } label: {
+                HStack {
+                    Text("\(title) · \(count)")
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                }
+                .foregroundStyle(Theme.accent)
             }
             .listRowBackground(Color.clear)
         }
     }
 
-    @ViewBuilder
-    private var albumsSection: some View {
-        ForEach(albums.filter { matches($0.album) || matches($0.artist ?? "") }) { a in
-            NavigationLink(value: Route.album(artist: a.artist, album: a.album)) {
-                HStack(spacing: 12) {
-                    ArtworkView(trackId: a.coverTrackId, size: 96, fallback: a.album, cornerRadius: 6)
-                        .frame(width: 44, height: 44)
-                    VStack(alignment: .leading) {
-                        Text(a.album).lineLimit(1)
-                        Text([a.artist ?? "", "\(a.tracks ?? 0) треков", a.game == true ? "OST" : ""]
-                            .filter { !$0.isEmpty }.joined(separator: " · "))
-                            .font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
-                    }
-                    Spacer()
-                    if app.isFavorite(album: a) {
-                        Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
-                    }
+    private func artistRow(_ a: ArtistItem) -> some View {
+        NavigationLink(value: Route.artist(a.artist)) {
+            HStack(spacing: 12) {
+                ArtistAvatar(artist: a.artist, coverTrackId: a.coverTrackId, size: 96, cornerRadius: 22)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading) {
+                    Text(a.artist).lineLimit(1)
+                    Text("\(a.tracks ?? 0) треков").font(.caption).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                if app.favoriteArtists.contains(a.artist) {
+                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
                 }
             }
-            .listRowBackground(Color.clear)
         }
+        .listRowBackground(Color.clear)
+    }
+
+    private func albumRow(_ a: AlbumItem) -> some View {
+        NavigationLink(value: Route.album(artist: a.artist, album: a.album)) {
+            HStack(spacing: 12) {
+                ArtworkView(trackId: a.coverTrackId, size: 96, fallback: a.album, cornerRadius: 6)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading) {
+                    Text(a.album).lineLimit(1)
+                    Text([a.artist ?? "", "\(a.tracks ?? 0) треков", a.game == true ? "OST" : ""]
+                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+                Spacer()
+                if app.isFavorite(album: a) {
+                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .listRowBackground(Color.clear)
     }
 
     @ViewBuilder
@@ -159,6 +219,30 @@ struct LibraryView: View {
         ])
     }
 
+    /// Artists of a track list: each credited artist, by number of tracks; the cover is
+    /// the first of their tracks that has artwork.
+    static func groupArtists(_ tracks: [Track]) -> [ArtistItem] {
+        var by: [String: ArtistItem] = [:]
+        var hasArt: Set<String> = []
+        for t in tracks {
+            let names = (t.artists ?? []).compactMap { Optional($0).nonEmpty }
+            for raw in names.isEmpty ? [t.artist.nonEmpty ?? "Unknown"] : names {
+                let name = raw.trimmingCharacters(in: .whitespaces)
+                let key = name.lowercased()
+                var item = by[key] ?? ArtistItem(artist: name, tracks: 0, coverTrackId: t.id)
+                item.tracks = (item.tracks ?? 0) + 1
+                if t.artwork != nil, !hasArt.contains(key) {
+                    item.coverTrackId = t.id
+                    hasArt.insert(key)
+                }
+                by[key] = item
+            }
+        }
+        return by.values.sorted {
+            ($0.tracks ?? 0, $1.artist) > ($1.tracks ?? 0, $0.artist)
+        }
+    }
+
     private func load() async {
         let api = app.api
         async let t = try? api.library()
@@ -166,7 +250,11 @@ struct LibraryView: View {
         async let al = try? api.albums()
         async let f = try? api.favorites()
         tracks = await t ?? tracks
-        artists = await ar ?? artists
+        // Artists come from the same track list as the Tracks tab (as on the web), so
+        // every artist found there is found here too; the server's list only has
+        // tracks the radio index already holds.
+        let grouped = Self.groupArtists(tracks)
+        artists = grouped.isEmpty ? (await ar ?? artists) : grouped
         albums = await al ?? albums
         favorites = await f ?? favorites
         loaded = true

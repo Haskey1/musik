@@ -29,10 +29,20 @@ struct HomeView: View {
             }
             .padding(.bottom, 24)
         }
-        .refreshable { await load() }
+        .refreshable {
+            await app.refreshArtistPhotos(force: true)
+            await load()
+        }
         .task { if !loaded { await load() } }
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
         .navigationBarHidden(true)
+        // No navigation bar here, so give the status bar its own backdrop:
+        // otherwise shelf titles scroll right under the clock.
+        .overlay(alignment: .top) {
+            Color.clear
+                .frame(height: 0)
+                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .top)
+        }
         .sheet(item: $shareItem) { item in
             ActivityView(items: [item.url])
                 .presentationDetents([.medium, .large])
@@ -131,7 +141,7 @@ struct HomeView: View {
     @ViewBuilder
     private var discoveryShelves: some View {
         if let recTracks = recs.tracks, !recTracks.isEmpty {
-            Shelf(title: "Похожее на любимое", subtitle: "по звучанию (CLAP)") {
+            Shelf(title: "Похожее на любимое", subtitle: recs.explanation ?? "по звучанию и лайкам") {
                 ForEach(recTracks) { t in
                     TrackCard(track: t) {
                         player.play(["track_ids": recTracks.map(\.id), "start_track_id": t.id,
@@ -277,7 +287,7 @@ struct TipCard: View {
             if let ids = tip.trackIds, !ids.isEmpty {
                 player.play(["track_ids": ids, "name": tip.album ?? tip.artist ?? "Открытие"])
             } else {
-                player.play(["artist": tip.artist ?? "", "album": tip.album ?? ""])
+                player.playCatalog(artist: tip.artist, album: tip.album)
             }
         } label: {
             VStack(alignment: .leading, spacing: 6) {

@@ -5,23 +5,43 @@ struct ArtistDetailView: View {
     @EnvironmentObject var player: PlayerController
     let artist: String
 
+    @ObservedObject private var photos = ArtistPhotos.shared
     @State private var tracks: [Track] = []
     @State private var similar: [ArtistItem] = []
     @State private var loaded = false
+    @State private var tint = Theme.surfaceHigh
+    @State private var collapsed = false
+
+    private var photo: URL? { photos.fullURL(for: artist, api: app.api) }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
-                DetailHeader(
-                    coverTrackId: tracks.first?.id,
-                    title: artist,
-                    subtitle: "\(tracks.count) треков",
-                    round: true,
-                    isFavorite: app.favoriteArtists.contains(artist),
-                    onPlay: { player.play(["artist": artist]) },
-                    onRadio: radioAction,
-                    onFavorite: { Task { await app.toggleFavoriteArtist(artist) } }
-                )
+                if let photo {
+                    ArtistHero(
+                        artist: artist,
+                        photo: photo,
+                        subtitle: "\(tracks.count) треков",
+                        isFavorite: app.favoriteArtists.contains(artist),
+                        onPlay: { player.playCatalog(artist: artist, tracks: tracks) },
+                        onRadio: radioAction,
+                        onFavorite: { Task { await app.toggleFavoriteArtist(artist) } },
+                        tint: $tint,
+                        collapsed: $collapsed
+                    )
+                } else {
+                    DetailHeader(
+                        coverTrackId: tracks.first?.id,
+                        artist: artist,
+                        title: artist,
+                        subtitle: "\(tracks.count) треков",
+                        round: true,
+                        isFavorite: app.favoriteArtists.contains(artist),
+                        onPlay: { player.playCatalog(artist: artist, tracks: tracks) },
+                        onRadio: radioAction,
+                        onFavorite: { Task { await app.toggleFavoriteArtist(artist) } }
+                    )
+                }
 
                 let albums = albumsOfArtist
                 if albums.count > 1 {
@@ -35,7 +55,7 @@ struct ArtistDetailView: View {
                 }
 
                 TrackList(tracks: tracks, loaded: loaded) { t in
-                    player.play(["artist": artist, "start_track_id": t.id])
+                    player.playCatalog(artist: artist, tracks: tracks, startTrackId: t.id)
                 }
 
                 if !similar.isEmpty {
@@ -43,10 +63,32 @@ struct ArtistDetailView: View {
                 }
             }
             .padding(.bottom, 24)
+            // the photo's colour under the header, fading into the usual background
+            .background(alignment: .top) {
+                if photo != nil {
+                    VStack(spacing: 0) {
+                        tint.frame(height: ArtistHero.height)
+                        LinearGradient(colors: [tint, tint.opacity(0)], startPoint: .top, endPoint: .bottom)
+                            .frame(height: 520)
+                    }
+                    .allowsHitTesting(false)
+                }
+            }
         }
+        .coordinateSpace(name: ArtistHero.coordinateSpace)
+        .ignoresSafeArea(edges: photo != nil ? .top : [])
         .background(Theme.backdrop)
-        .navigationTitle(artist)
+        .toolbar {
+            if let url = app.shareURL(artist: artist) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    SwiftUI.ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                }
+            }
+        }
+        .navigationTitle(photo == nil || collapsed ? artist : "")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(photo == nil ? .automatic : (collapsed ? .visible : .hidden), for: .navigationBar)
+        .animation(.easeInOut(duration: 0.2), value: collapsed)
         .task {
             guard !loaded else { return }
             let api = app.api
@@ -89,7 +131,7 @@ struct AlbumDetailView: View {
                         .filter { !$0.isEmpty }.joined(separator: " · "),
                     round: false,
                     isFavorite: app.favoriteAlbums.contains(albumKey(artist, album)),
-                    onPlay: { player.play(["artist": artist ?? "", "album": album]) },
+                    onPlay: { player.playCatalog(artist: artist, album: album, tracks: tracks) },
                     onRadio: radioAction,
                     onFavorite: { Task { await app.toggleFavoriteAlbum(artist: artist, album: album) } }
                 )
@@ -103,7 +145,7 @@ struct AlbumDetailView: View {
                 }
 
                 TrackList(tracks: tracks, loaded: loaded, numbered: true) { t in
-                    player.play(["artist": artist ?? "", "album": album, "start_track_id": t.id])
+                    player.playCatalog(artist: artist, album: album, tracks: tracks, startTrackId: t.id)
                 }
 
                 if !similar.isEmpty {
@@ -113,6 +155,13 @@ struct AlbumDetailView: View {
             .padding(.bottom, 24)
         }
         .background(Theme.backdrop)
+        .toolbar {
+            if let url = app.shareURL(artist: artist ?? tracks.first?.artist, album: album) {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    SwiftUI.ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                }
+            }
+        }
         .navigationTitle(album)
         .navigationBarTitleDisplayMode(.inline)
         .task {
@@ -134,6 +183,8 @@ struct AlbumDetailView: View {
 
 private struct DetailHeader: View {
     let coverTrackId: Int?
+    /// Set on an artist page: the artist's photo instead of a track cover.
+    var artist: String? = nil
     let title: String
     let subtitle: String
     let round: Bool
@@ -144,7 +195,13 @@ private struct DetailHeader: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            ArtworkView(trackId: coverTrackId, size: 640, fallback: title, cornerRadius: round ? 110 : 18)
+            Group {
+                if let artist {
+                    ArtistAvatar(artist: artist, coverTrackId: coverTrackId, size: 640, cornerRadius: 110)
+                } else {
+                    ArtworkView(trackId: coverTrackId, size: 640, fallback: title, cornerRadius: round ? 110 : 18)
+                }
+            }
                 .frame(width: 220, height: 220)
                 .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
             VStack(spacing: 4) {

@@ -13,6 +13,35 @@ extension APIClient {
         _ = try await send("POST", "/api/auth/login", body: ["password": password], redirectOn401: false)
     }
 
+    /// Web-style sign-in (session cookie) for servers that can't issue device tokens.
+    func login(username: String, password: String) async throws {
+        _ = try await send("POST", "/api/auth/login", body: ["username": username, "password": password],
+                           redirectOn401: false)
+    }
+
+    /// Multi-user sign-in: username + password give a personal device token
+    /// (the same kind the web UI issues under account → device tokens).
+    func issueToken(username: String, password: String, deviceName: String) async throws -> String {
+        struct Issued: Decodable { var token: String? }
+        let data = try await send("POST", "/api/auth/token", body: [
+            "username": username, "password": password, "device_name": deviceName,
+        ], redirectOn401: false)
+        guard let token = try decode(Issued.self, from: data).token, !token.isEmpty else {
+            throw APIError(status: 0, code: "no_token", message: "Сервер не выдал токен")
+        }
+        return token
+    }
+
+    /// Quick reachability check with a short timeout (the offline player polls it).
+    func ping() async -> Bool {
+        guard let target = try? url("/api/health") else { return false }
+        var req = URLRequest(url: target, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
+        for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+        guard let result = try? await session.data(for: req) else { return false }
+        let status = (result.1 as? HTTPURLResponse)?.statusCode ?? 0
+        return status > 0 && status < 500
+    }
+
     func logout() async {
         _ = try? await send("POST", "/api/auth/logout", redirectOn401: false)
     }
@@ -72,6 +101,26 @@ extension APIClient {
     // Library actions
     func toggleFavorite(_ body: [String: Any]) async throws -> FavoriteToggleResult {
         try await post("/api/favorites/toggle", body)
+    }
+
+    // Radio rules («Скрыть», «Реже»): the server keeps them out of radio, mixes and recommendations.
+    func createRule(target: String, action: String, track: Track, sessionId: String?,
+                    strength: Double = 1) async throws -> RuleCreated {
+        var body: [String: Any] = [
+            "target_type": target, "action": action, "scope": "global", "preset": "forever",
+            "track_id": track.id, "artist": track.artist ?? "", "album": track.album ?? "",
+            "strength": strength,
+        ]
+        if let sessionId { body["session_id"] = sessionId }
+        return try await post("/api/rules", body)
+    }
+
+    func rules() async throws -> [RadioRule] {
+        try await get("/api/rules", as: RulesResponse.self).rules
+    }
+
+    func deleteRule(_ id: String) async throws {
+        _ = try await send("DELETE", "/api/rules/\(id)")
     }
 
     func addLater(trackId: Int) async throws {

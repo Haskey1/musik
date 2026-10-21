@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/torwin-job/musik/player/internal/playback"
 	"github.com/torwin-job/musik/player/internal/themes"
 )
 
@@ -68,8 +69,11 @@ func playHTTPStatus(err error) int {
 	if err == nil {
 		return 0
 	}
-	switch err.Error() {
-	case "нет доступных треков", "ничего не найдено", "track not found", "track not in playlist":
+	switch {
+	case errors.Is(err, playback.ErrNoTracks),
+		errors.Is(err, playback.ErrNothingFound),
+		errors.Is(err, playback.ErrTrackNotFound),
+		errors.Is(err, playback.ErrTrackNotInPlaylist):
 		return http.StatusNotFound
 	default:
 		return http.StatusBadRequest
@@ -225,8 +229,9 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"static": s.staticVersion(),
 	}
 	if s.Auth == nil || !s.Auth.Cfg.Enabled() || s.Auth.Authorized(r) {
-		out["tracks"] = s.Idx.Size()
-		out["dim"] = s.Idx.Dim()
+		tracks, dim := s.catalogStats()
+		out["tracks"] = tracks
+		out["dim"] = dim
 	}
 	writeJSON(w, out)
 }
@@ -293,12 +298,7 @@ func (s *Server) handleManifest(w http.ResponseWriter, _ *http.Request) {
   "display": "standalone",
   "background_color": "#141210",
   "theme_color": "#c45c26",
-  "description": "Local smart music player",
-  "icons": [
-    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
-    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
-    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
-  ]
+  "description": "Local smart music player"
 }`))
 }
 

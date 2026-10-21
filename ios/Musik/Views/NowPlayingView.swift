@@ -9,16 +9,20 @@ struct NowPlayingView: View {
 
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
     @Environment(\.dismiss) private var dismiss
 
-    @State private var scrubbing = false
-    @State private var scrub: Double = 0
     @State private var pane: Pane = .queue
+    @State private var showEqualizer = false
+    /// A sideways swipe on the cover is in progress: no scrolling, no closing meanwhile.
+    @State private var swiping = false
+    @ObservedObject private var eq = Equalizer.shared
 
     var body: some View {
         ZStack {
-            Theme.backdrop
+            CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
+                ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 22) {
                         topBar
@@ -27,22 +31,49 @@ struct NowPlayingView: View {
                             .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
                             .scaleEffect(player.isPlaying ? 1 : 0.94)
                             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.isPlaying)
+                            .swipeToSkip(threshold: 90) { swiping = $0 }
                             .padding(.horizontal, 24)
                         titleBlock(track)
-                        seekBar
+                        SeekBar()
                         transport
-                        actions(track)
-                        Picker("", selection: $pane) {
-                            ForEach(Pane.allCases) { Text($0.rawValue).tag($0) }
+                        actions(track) {
+                            // «Текст» swaps the queue below for the lyrics and scrolls to them
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                pane = pane == .lyrics ? .queue : .lyrics
+                            }
+                            if pane == .lyrics {
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                    withAnimation(.easeInOut(duration: 0.35)) {
+                                        scroller.scrollTo("pane", anchor: .top)
+                                    }
+                                }
+                            }
                         }
-                        .pickerStyle(.segmented)
+                        Group {
+                            switch pane {
+                            case .queue: upNext
+                            case .lyrics: LyricsView(trackId: track.id)
+                            }
+                        }
+                        .id("pane")
+                        // quiet, at the very bottom — as in Yandex Music
+                        HStack {
+                            Spacer()
+                            Button { showEqualizer = true } label: {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.title3)
+                                    .foregroundStyle(eq.enabled ? Color.white : Color.white.opacity(0.7))
+                                    .frame(width: 64, height: 48)
+                                    .background(Color.white.opacity(eq.enabled ? 0.28 : 0.12), in: Capsule())
+                            }
+                            .accessibilityLabel("Эквалайзер")
+                        }
                         .padding(.horizontal, 20)
-                        switch pane {
-                        case .queue: upNext
-                        case .lyrics: LyricsView(trackId: track.id)
-                        }
+                        .padding(.top, 8)
                     }
                     .padding(.bottom, 32)
+                }
+                .scrollDisabled(swiping)
                 }
             } else {
                 VStack(spacing: 12) {
@@ -52,7 +83,10 @@ struct NowPlayingView: View {
                 }
             }
         }
+        .tint(.white)
         .overlay(alignment: .top) { ToastView() }
+        .sheet(isPresented: $showEqualizer) { EqualizerView() }
+        .interactiveDismissDisabled(swiping)
     }
 
     // MARK: Parts
@@ -67,12 +101,44 @@ struct NowPlayingView: View {
                 Text(player.listName ?? (player.fixed ? "Плейлист" : "Радио"))
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(1)
-                Text(Labels.maturity(player.maturity))
-                    .font(.caption2)
-                    .foregroundStyle(Theme.teal)
+                if player.offlineMode {
+                    Label("офлайн · с телефона", systemImage: "wifi.slash")
+                        .font(.caption2)
+                        .foregroundStyle(Color.white)
+                } else {
+                    Text(Labels.maturity(player.maturity))
+                        .font(.caption2)
+                        .foregroundStyle(Color.white.opacity(0.8))
+                }
             }
             Spacer()
-            Color.clear.frame(width: 24, height: 24)
+            if let track = player.current {
+                if let url = app.shareURL(track: track) {
+                    SwiftUI.ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up").font(.title3)
+                    }
+                    .padding(.trailing, 14)
+                    .accessibilityLabel("Поделиться")
+                }
+                Menu {
+                    Button { showEqualizer = true } label: {
+                        Label("Эквалайзер", systemImage: "slider.horizontal.3")
+                    }
+                    Button(role: .destructive) { player.hide(.track) } label: {
+                        Label("Скрыть этот трек", systemImage: "eye.slash")
+                    }
+                    if let artist = track.artist.nonEmpty {
+                        Button(role: .destructive) { player.hide(.artist) } label: {
+                            Label("Скрыть артиста «\(artist)»", systemImage: "person.crop.circle.badge.xmark")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle").font(.title3)
+                }
+                .accessibilityLabel("Не предлагать")
+            } else {
+                Color.clear.frame(width: 24, height: 24)
+            }
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -84,47 +150,38 @@ struct NowPlayingView: View {
                 .font(.title2.weight(.bold))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
-            Text(track.subtitle)
-                .font(.subheadline)
-                .foregroundStyle(Theme.muted)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
+            // artist and album open their pages
+            HStack(spacing: 6) {
+                if let artist = track.artist.nonEmpty {
+                    Button { app.pendingRoute = .artist(artist) } label: {
+                        Text(artist).underline(false)
+                    }
+                }
+                if track.artist.nonEmpty != nil, track.album.nonEmpty != nil {
+                    Text("·")
+                }
+                if let album = track.album.nonEmpty {
+                    Button { app.pendingRoute = .album(artist: track.artist, album: album) } label: {
+                        Text(album)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .font(.subheadline)
+            .foregroundStyle(Color.white.opacity(0.7))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
             if let source = Labels.source(track.source) {
                 Text(source)
                     .font(.caption2.weight(.semibold))
                     .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Theme.teal.opacity(0.25), in: Capsule())
-                    .foregroundStyle(Theme.teal)
+                    .background(Color.white.opacity(0.15), in: Capsule())
+                    .foregroundStyle(Color.white.opacity(0.8))
             }
         }
         .padding(.horizontal, 24)
     }
 
-    private var seekBar: some View {
-        let total = max(player.duration, 1)
-        return VStack(spacing: 4) {
-            Slider(value: Binding(
-                get: { scrubbing ? scrub : min(player.position, total) },
-                set: { scrub = $0 }
-            ), in: 0...total, onEditingChanged: { editing in
-                if editing {
-                    scrub = player.position
-                    scrubbing = true
-                } else {
-                    player.seek(to: scrub)
-                    scrubbing = false
-                }
-            })
-            HStack {
-                Text(formatTime(scrubbing ? scrub : player.position))
-                Spacer()
-                Text(formatTime(player.duration))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(Theme.muted)
-        }
-        .padding(.horizontal, 24)
-    }
 
     private var transport: some View {
         HStack(spacing: 44) {
@@ -134,9 +191,9 @@ struct NowPlayingView: View {
             Button { player.togglePlay() } label: {
                 ZStack {
                     Circle()
-                        .fill(LinearGradient(colors: [Theme.accentBright, Theme.accent],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .fill(Color.white)
                         .frame(width: 76, height: 76)
+                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
                     if player.isBuffering || player.busy {
                         ProgressView().tint(.black)
                     } else {
@@ -154,54 +211,59 @@ struct NowPlayingView: View {
         .foregroundStyle(.primary)
     }
 
-    private func actions(_ track: Track) -> some View {
+    /// Two rows under the transport: rate / save, then explore.
+    private func actions(_ track: Track, onLyrics: @escaping () -> Void) -> some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
                 Button { player.like() } label: {
                     Image(systemName: player.isFavorite ? "heart.fill" : "heart")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(ChipButtonStyle(active: player.isFavorite))
+                .buttonStyle(GlassChipStyle(active: player.isFavorite))
                 .accessibilityLabel("Любимая")
 
-                Button { player.dislike() } label: {
-                    Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                // a second tap takes the dislike back
+                Button { player.disliked ? player.undislike() : player.dislike() } label: {
+                    Image(systemName: player.disliked ? "heart.slash.fill" : "heart.slash")
+                        .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(ChipButtonStyle(active: player.disliked))
-                .disabled(player.disliked)
-                .accessibilityLabel("Дизлайк")
+                .buttonStyle(GlassChipStyle(active: player.disliked))
+                .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк")
 
-                Button { Task { await app.addLater(track.id) } } label: {
-                    Label("Потом", systemImage: "clock")
+                Button {
+                    if offline.isSaved(track.id) { offline.remove(track.id) } else { offline.save(track) }
+                } label: {
+                    Group {
+                        if offline.downloading.contains(track.id) {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: offline.isSaved(track.id) ? "arrow.down.circle.fill" : "arrow.down.circle")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(ChipButtonStyle())
-
-                Button { player.playSimilarNow() } label: {
-                    Label("Похожее", systemImage: "sparkles")
-                }
-                .buttonStyle(ChipButtonStyle())
+                .buttonStyle(GlassChipStyle(active: offline.isSaved(track.id)))
+                .accessibilityLabel("Сохранить на телефон")
             }
             HStack(spacing: 10) {
-                if let artist = track.artist.nonEmpty {
-                    Button { Task { await app.toggleFavoriteArtist(artist) } } label: {
-                        Label("артист", systemImage: app.favoriteArtists.contains(artist) ? "heart.fill" : "heart")
-                    }
-                    .buttonStyle(ChipButtonStyle(active: app.favoriteArtists.contains(artist)))
+                Button { player.playSimilarNow() } label: {
+                    Label("Похожее", systemImage: "sparkles").frame(maxWidth: .infinity)
                 }
-                if let album = track.album.nonEmpty {
-                    let fav = app.favoriteAlbums.contains(albumKey(track.artist, album))
-                    Button { Task { await app.toggleFavoriteAlbum(artist: track.artist, album: album) } } label: {
-                        Label("альбом", systemImage: fav ? "heart.fill" : "heart")
-                    }
-                    .buttonStyle(ChipButtonStyle(active: fav))
+                .buttonStyle(GlassChipStyle())
+
+                Button(action: onLyrics) {
+                    Label("Текст", systemImage: "quote.bubble").frame(maxWidth: .infinity)
                 }
+                .buttonStyle(GlassChipStyle(active: pane == .lyrics))
+
                 Button { player.startRadio(seed: track.id) } label: {
-                    Label("Радио", systemImage: "dot.radiowaves.left.and.right")
+                    Label("Радио", systemImage: "dot.radiowaves.left.and.right").frame(maxWidth: .infinity)
                 }
-                .buttonStyle(ChipButtonStyle())
+                .buttonStyle(GlassChipStyle())
             }
         }
         .labelStyle(.titleAndIcon)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 20)
     }
 
     @ViewBuilder
@@ -210,16 +272,16 @@ struct NowPlayingView: View {
             if player.fixed {
                 Text("В этом списке · \(player.playlist.count)")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
                 ForEach(Array(player.playlist.enumerated()), id: \.offset) { i, t in
                     TrackRow(track: t, index: i) {
                         player.jump(trackId: t.id, index: t.position ?? i)
                     }
                 }
             } else {
-                Text("Дальше в радио · нажми — сразу она")
+                Text("Дальше в радио")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
                 ForEach(Array(player.queue.enumerated()), id: \.offset) { i, item in
                     QueueRow(item: item) {
                         player.jump(trackId: item.trackId, index: i)
@@ -248,16 +310,16 @@ private struct QueueRow: View {
                     HStack(spacing: 6) {
                         Text(item.artist ?? "").lineLimit(1)
                         if let why = Labels.why(item) {
-                            Text(why).italic().foregroundStyle(Theme.teal).lineLimit(1)
+                            Text(why).italic().foregroundStyle(Color.white.opacity(0.8)).lineLimit(1)
                         }
                     }
                     .font(.caption)
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
                 }
                 Spacer(minLength: 8)
                 Text(formatTime(item.duration))
                     .font(.caption.monospacedDigit())
-                    .foregroundStyle(Theme.muted)
+                    .foregroundStyle(Color.white.opacity(0.7))
             }
             .contentShape(Rectangle())
         }
@@ -265,10 +327,65 @@ private struct QueueRow: View {
     }
 }
 
+/// The seek bar: redraws with the clock without touching the rest of the screen.
+/// A tap anywhere on the line jumps there; dragging scrubs, the seek happens on release.
+private struct SeekBar: View {
+    @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var clock: PlaybackClock
+    @State private var scrubbing = false
+    @State private var scrub: Double = 0
+
+    var body: some View {
+        let total = max(clock.duration, 1)
+        let value = scrubbing ? scrub : min(clock.position, total)
+        VStack(spacing: 4) {
+            GeometryReader { geo in
+                let width = max(geo.size.width, 1)
+                let x = CGFloat(value / total) * width
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.25)).frame(height: scrubbing ? 8 : 5)
+                    Capsule().fill(Color.white).frame(width: max(x, 0), height: scrubbing ? 8 : 5)
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: scrubbing ? 22 : 14, height: scrubbing ? 22 : 14)
+                        .shadow(color: .black.opacity(0.3), radius: 3)
+                        .offset(x: min(max(x - (scrubbing ? 11 : 7), -4), width - 10))
+                }
+                .frame(maxHeight: .infinity)
+                .contentShape(Rectangle())
+                .gesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { g in
+                            scrub = Double(min(max(g.location.x / width, 0), 1)) * total
+                            if !scrubbing { withAnimation(.easeOut(duration: 0.15)) { scrubbing = true } }
+                        }
+                        .onEnded { g in
+                            let target = Double(min(max(g.location.x / width, 0), 1)) * total
+                            scrub = target
+                            player.seek(to: target)
+                            withAnimation(.easeOut(duration: 0.2)) { scrubbing = false }
+                        }
+                )
+            }
+            .frame(height: 28)
+            .animation(.easeOut(duration: 0.15), value: scrubbing)
+            HStack {
+                Text(formatTime(scrubbing ? scrub : clock.position))
+                Spacer()
+                Text(formatTime(clock.duration))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(Color.white.opacity(0.7))
+        }
+        .padding(.horizontal, 24)
+    }
+}
+
 /// Plain or time-synced (LRC) lyrics; the synced line under the playhead is highlighted.
 struct LyricsView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var clock: PlaybackClock
     let trackId: Int
 
     @State private var lyrics: Lyrics?
@@ -284,7 +401,7 @@ struct LyricsView: View {
                 ForEach(Array(lines.enumerated()), id: \.offset) { i, line in
                     Text(line.text.isEmpty ? "♪" : line.text)
                         .font(.title3.weight(i == active ? .bold : .regular))
-                        .foregroundStyle(i == active ? Theme.accentBright : Theme.muted)
+                        .foregroundStyle(i == active ? Color.white : Color.white.opacity(0.7))
                         .onTapGesture { player.seek(to: line.time) }
                 }
             } else if let plain = lyrics?.plainLyrics.nonEmpty {
@@ -299,7 +416,7 @@ struct LyricsView: View {
     }
 
     private var activeIndex: Int? {
-        lines.lastIndex { $0.time <= player.position + 0.3 }
+        lines.lastIndex { $0.time <= clock.position + 0.3 }
     }
 
     private func load() async {
@@ -325,5 +442,22 @@ struct LyricsView: View {
             }
         }
         return out.sorted { $0.time < $1.time }
+    }
+}
+
+
+/// Chips over the cover-coloured background: frosted white instead of the app's dark
+/// surface and orange, so they read on any cover colour.
+struct GlassChipStyle: ButtonStyle {
+    var active = false
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(active ? 0.3 : 0.12), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(active ? 0.55 : 0.14)))
+            .foregroundStyle(Color.white)
+            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }

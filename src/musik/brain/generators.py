@@ -181,6 +181,7 @@ def generate_radio(
             size=1,
             explore_ratio=explore_ratio,
             pool=80,
+            recent_artists=[o.get("artist") or "" for o in order[-4:]],
         )
         if not nxt:
             break

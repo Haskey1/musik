@@ -3,10 +3,14 @@ import SwiftUI
 struct LoginView: View {
     @EnvironmentObject var app: AppState
     @State private var baseURL = ""
-    @State private var mode: AppState.LoginMode = .token
+    @State private var mode: AppState.LoginMode = .account
+    @State private var username = ""
     @State private var secret = ""
     @State private var busy = false
     @State private var error: String?
+    /// Server address and token sign-in: hidden when the app has a built-in server
+    /// (friends just type login + password); a long press on the logo shows them.
+    @State private var advanced = Settings.builtInServer.isEmpty
 
     var body: some View {
         ScrollView {
@@ -15,28 +19,45 @@ struct LoginView: View {
                     Text("musik").font(.display(56))
                         .foregroundStyle(LinearGradient(colors: [Theme.accentBright, Theme.accent],
                                                         startPoint: .leading, endPoint: .trailing))
-                    Text("Твой сервер, твой вкус. Подключись к Go player.")
+                    Text("Войди под своим логином и паролем.")
                         .foregroundStyle(Theme.muted)
                 }
                 .padding(.top, 48)
+                .contentShape(Rectangle())
+                .onLongPressGesture { withAnimation { advanced.toggle() } }
 
-                field("Адрес сервера") {
-                    TextField("http://192.168.1.10:8787", text: $baseURL)
-                        .keyboardType(.URL)
-                        .textContentType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                if advanced {
+                    field("Адрес сервера") {
+                        TextField("https://music.example.com", text: $baseURL)
+                            .keyboardType(.URL)
+                            .textContentType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+
+                    Picker("Вход", selection: $mode) {
+                        ForEach(AppState.LoginMode.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
                 }
 
-                Picker("Вход", selection: $mode) {
-                    ForEach(AppState.LoginMode.allCases) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented)
-
-                field(mode == .token ? "MUSIK_API_TOKEN" : "MUSIK_PASSWORD") {
-                    SecureField(mode == .token ? "токен из .env сервера" : "пароль", text: $secret)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                if mode == .account {
+                    field("Логин") {
+                        TextField("как на сайте", text: $username)
+                            .textContentType(.username)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
+                    field("Пароль") {
+                        SecureField("пароль от musik", text: $secret)
+                            .textContentType(.password)
+                    }
+                } else {
+                    field("Токен устройства") {
+                        SecureField("из аккаунта на сайте", text: $secret)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    }
                 }
 
                 if let error {
@@ -53,9 +74,9 @@ struct LoginView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(PrimaryButtonStyle())
-                .disabled(busy || baseURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(busy || baseURL.trimmingCharacters(in: .whitespaces).isEmpty || secret.isEmpty)
 
-                Text("Для LAN запусти player с MUSIK_PLAYER_ADDR=0.0.0.0:8787. Токен рекомендуется: он хранится в Keychain и работает и для потока, и для обложек.")
+                Text("Логин и пароль — те же, что на сайте. Пароль на телефоне не сохраняется.")
                     .font(.footnote)
                     .foregroundStyle(Theme.muted)
             }
@@ -80,7 +101,7 @@ struct LoginView: View {
         error = nil
         defer { busy = false }
         do {
-            try await app.login(baseURL: baseURL, mode: mode, secret: secret)
+            try await app.login(baseURL: baseURL, mode: mode, username: username, secret: secret)
             secret = ""
         } catch is CancellationError {
         } catch {

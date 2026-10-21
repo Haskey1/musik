@@ -34,6 +34,28 @@ type Builder struct {
 	Cfg   config.Config
 	Rng   *rand.Rand
 	rngMu sync.Mutex
+
+	countsMu  sync.Mutex
+	countsFor *index.Index
+	countsN   int
+	counts    map[string]int
+}
+
+// artistCounts is the number of tracks per artist key, rebuilt when the index changes.
+func (b *Builder) artistCounts() map[string]int {
+	b.countsMu.Lock()
+	defer b.countsMu.Unlock()
+	if b.counts != nil && b.countsFor == b.Idx && b.countsN == b.Idx.Size() {
+		return b.counts
+	}
+	counts := make(map[string]int, 1024)
+	for row := 0; row < b.Idx.Size(); row++ {
+		if ak := index.ArtistKey(b.Idx.MetaAt(row).Artist); ak != "" {
+			counts[ak]++
+		}
+	}
+	b.counts, b.countsFor, b.countsN = counts, b.Idx, b.Idx.Size()
+	return counts
 }
 
 func NewBuilder(idx *index.Index, cfg config.Config) *Builder {
@@ -56,6 +78,8 @@ func (b *Builder) RandomFloat64() float64 {
 }
 
 // PickRandom returns a random track id not in exclude.
+// It returns 0 when the catalog is empty or every track is excluded.
+// Callers stop playback or explicitly relax the exclude; this function does not.
 func (b *Builder) PickRandom(exclude map[int64]bool) int64 {
 	n := b.Idx.Size()
 	if n == 0 {
@@ -69,7 +93,7 @@ func (b *Builder) PickRandom(exclude map[int64]bool) int64 {
 		}
 	}
 	if len(allowed) == 0 {
-		return b.Idx.MetaAt(0).ID
+		return 0
 	}
 	return allowed[b.newRNG().Intn(len(allowed))]
 }

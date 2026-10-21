@@ -12,9 +12,22 @@ extension View {
     func withRoutes() -> some View {
         navigationDestination(for: Route.self) { route in
             switch route {
-            case .artist(let name): ArtistDetailView(artist: name)
-            case .album(let artist, let album): AlbumDetailView(artist: artist, album: album)
+            case .artist(let name): ArtistDetailView(artist: name).miniPlayerSpace()
+            case .album(let artist, let album): AlbumDetailView(artist: artist, album: album).miniPlayerSpace()
             }
+        }
+    }
+
+    /// Keeps the bottom of a scrolling screen clear of the floating mini player.
+    func miniPlayerSpace() -> some View { modifier(MiniPlayerSpace()) }
+}
+
+private struct MiniPlayerSpace: ViewModifier {
+    @EnvironmentObject var player: PlayerController
+
+    func body(content: Content) -> some View {
+        content.safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: player.current == nil ? 0 : MiniPlayer.height)
         }
     }
 }
@@ -109,7 +122,7 @@ struct ArtistCard: View {
     var body: some View {
         NavigationLink(value: Route.artist(artist.artist)) {
             VStack(spacing: 6) {
-                ArtworkView(trackId: artist.coverTrackId, size: 256, fallback: artist.artist, cornerRadius: 60)
+                ArtistAvatar(artist: artist.artist, coverTrackId: artist.coverTrackId, size: 256, cornerRadius: 60)
                     .frame(width: 112, height: 112)
                 Text(artist.artist).font(.subheadline.weight(.semibold)).lineLimit(1)
                 if let n = artist.tracks {
@@ -144,6 +157,7 @@ struct AlbumCard: View {
 struct TrackRow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
     let track: Track
     var index: Int?
     var showArtwork = true
@@ -169,6 +183,7 @@ struct TrackRow: View {
                     Text(track.subtitle).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
                 }
                 Spacer(minLength: 8)
+                SaveButton(track: track)
                 if app.favoriteTracks.contains(track.id) {
                     Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
                 }
@@ -188,12 +203,25 @@ struct TrackRow: View {
 struct TrackMenu: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
     let track: Track
 
     var body: some View {
+        if offline.isSaved(track.id) {
+            Button(role: .destructive) {
+                offline.remove(track.id)
+            } label: { Label("Удалить с телефона", systemImage: "trash") }
+        } else {
+            Button {
+                offline.save(track)
+            } label: { Label("Сохранить на телефон", systemImage: "arrow.down.circle") }
+        }
         Button {
             player.play(["track_id": track.id, "name": track.displayTitle])
         } label: { Label("Играть трек", systemImage: "play.fill") }
+        if let url = app.shareURL(track: track) {
+            SwiftUI.ShareLink(item: url) { Label("Поделиться", systemImage: "square.and.arrow.up") }
+        }
         Button {
             player.startRadio(seed: track.id)
         } label: { Label("Радио от трека", systemImage: "dot.radiowaves.left.and.right") }
@@ -201,7 +229,7 @@ struct TrackMenu: View {
             Task { await app.addLater(track.id) }
         } label: { Label("Потом", systemImage: "clock") }
         Button {
-            Task { await app.toggleFavoriteTrack(track.id) }
+            Task { await app.toggleFavoriteTrack(track.id, track: track) }
         } label: {
             app.favoriteTracks.contains(track.id)
                 ? Label("Убрать из любимых", systemImage: "heart.slash")
@@ -209,14 +237,58 @@ struct TrackMenu: View {
         }
         if let artist = track.artist.nonEmpty {
             Button {
-                player.play(["artist": artist])
+                player.playCatalog(artist: artist)
             } label: { Label("Весь артист", systemImage: "music.mic") }
         }
+        Menu {
+            Button(role: .destructive) {
+                player.hide(.track, track: track)
+            } label: { Label("Скрыть этот трек", systemImage: "eye.slash") }
+            if let artist = track.artist.nonEmpty {
+                Button(role: .destructive) {
+                    player.hide(.artist, track: track)
+                } label: { Label("Скрыть артиста «\(artist)»", systemImage: "person.crop.circle.badge.xmark") }
+            }
+        } label: { Label("Не предлагать", systemImage: "eye.slash") }
         if let album = track.album.nonEmpty {
             Button {
-                player.play(["artist": track.artist ?? "", "album": album])
+                player.playCatalog(artist: track.artist, album: album)
             } label: { Label("Весь альбом", systemImage: "square.stack") }
         }
+    }
+}
+
+/// Download state of a track: tap to save, a spinner while downloading, a filled
+/// icon once it is on the phone (tap again to remove).
+struct SaveButton: View {
+    @EnvironmentObject var offline: OfflineStore
+    let track: Track
+    var font: Font = .body
+
+    var body: some View {
+        Button {
+            if offline.isSaved(track.id) {
+                offline.remove(track.id)
+                AppToast.show("Удалено с телефона")
+            } else {
+                offline.save(track)
+            }
+        } label: {
+            Group {
+                if offline.downloading.contains(track.id) {
+                    ProgressView().controlSize(.small)
+                } else if offline.isSaved(track.id) {
+                    Image(systemName: "arrow.down.circle.fill").foregroundStyle(Theme.accent)
+                } else {
+                    Image(systemName: "arrow.down.circle").foregroundStyle(Theme.muted)
+                }
+            }
+            .font(font)
+            .frame(width: 30, height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(offline.isSaved(track.id) ? "Удалить с телефона" : "Сохранить")
     }
 }
 
@@ -264,4 +336,66 @@ struct ActivityView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ controller: UIActivityViewController, context: Context) {}
+}
+
+
+// MARK: - Swipe to skip
+
+extension View {
+    /// Swipe left — next track, swipe right — back. The view follows the finger a little
+    /// and springs back. The direction is decided by the first movement: a horizontal
+    /// swipe stays horizontal (`onSwiping(true)` lets the screen freeze its scrolling and
+    /// sheet dismissal meanwhile), a vertical one is left to scrolling and closing.
+    /// `exclusive` keeps buttons under the finger from firing at the end of the swipe.
+    func swipeToSkip(threshold: CGFloat, exclusive: Bool = false,
+                     onSwiping: ((Bool) -> Void)? = nil) -> some View {
+        modifier(SwipeToSkip(threshold: threshold, exclusive: exclusive, onSwiping: onSwiping))
+    }
+}
+
+private struct SwipeToSkip: ViewModifier {
+    @EnvironmentObject var player: PlayerController
+    let threshold: CGFloat
+    let exclusive: Bool
+    let onSwiping: ((Bool) -> Void)?
+    @State private var dx: CGFloat = 0
+    @State private var axis: Axis?
+
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 14)
+            .onChanged { g in
+                if axis == nil {
+                    axis = abs(g.translation.width) > abs(g.translation.height) ? .horizontal : .vertical
+                    if axis == .horizontal { onSwiping?(true) }
+                }
+                guard axis == .horizontal else { return }
+                dx = g.translation.width * 0.6
+            }
+            .onEnded { g in
+                if axis == .horizontal {
+                    let w = g.predictedEndTranslation.width
+                    if w < -threshold {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        player.skip()
+                    } else if w > threshold {
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        player.back()
+                    }
+                    onSwiping?(false)
+                }
+                axis = nil
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) { dx = 0 }
+            }
+    }
+
+    func body(content: Content) -> some View {
+        let moved = content
+            .offset(x: dx)
+            .opacity(1 - min(abs(dx) / (threshold * 4), 0.35))
+        if exclusive {
+            moved.highPriorityGesture(drag)
+        } else {
+            moved.simultaneousGesture(drag)
+        }
+    }
 }
