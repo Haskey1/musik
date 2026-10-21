@@ -4,6 +4,7 @@ import UIKit
 struct ProfileView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @EnvironmentObject var offline: OfflineStore
 
     @State private var profile: Profile?
     @State private var health: Health?
@@ -11,6 +12,7 @@ struct ProfileView: View {
     @State private var rules: [RadioRule] = []
     @State private var shareItem: ShareItem?
     @State private var mobileStream = Settings.shared.mobileStream
+    @State private var prefetchNext = Settings.shared.prefetchNext
     @State private var confirmLogout = false
 
     var body: some View {
@@ -118,6 +120,19 @@ struct ProfileView: View {
                 Text("Сервер отдаёт перекодированную версию, если она готова, иначе — оригинал. Выключи, чтобы всегда слушать оригинал (FLAC и т. п.).")
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
+            }
+
+            Section {
+                Toggle("Сохранять лайкнутые на телефон", isOn: $offline.autoSaveFavorites)
+                    .onChange(of: offline.autoSaveFavorites) { on in
+                        if on { Task { await app.refreshFavorites() } }
+                    }
+                Toggle("Подгружать следующие треки", isOn: $prefetchNext)
+                    .onChange(of: prefetchNext) { app.settings.prefetchNext = $0 }
+            } header: {
+                Text("Автоскачивание")
+            } footer: {
+                Text("Первое: любимые треки сами скачиваются на телефон (и удаляются, когда снимаешь ♥). Второе: два следующих трека загружаются заранее, чтобы музыка не обрывалась при плохой связи. Выключи — приложение качает только то, что ты сохранил сам.")
             }
 
             Section("Сервер") {

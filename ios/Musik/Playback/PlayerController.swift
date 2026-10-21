@@ -457,6 +457,28 @@ final class PlayerController: ObservableObject {
         }
     }
 
+    /// Taps the dislike again: takes it back (history, counters and taste on the server).
+    /// A server without the `undislike` event still gets the button reset, with a hint.
+    func undislike() {
+        guard let track = current, disliked else { return }
+        Task {
+            var note = "Дизлайк снят"
+            do {
+                if let res = try await self.postEvent("undislike", track: track) { self.applyLists(res) }
+            } catch let e as APIError where e.code == "unknown_event" {
+                note = "Дизлайк снят в приложении — обнови сервер, чтобы он забыл его"
+            } catch {
+                self.app?.show(error)
+                return
+            }
+            if track.id == self.current?.id {
+                self.disliked = false
+                self.updateFeedbackCommands()
+            }
+            self.app?.show(note)
+        }
+    }
+
     // MARK: - Hiding
 
     enum HideTarget { case track, artist }
@@ -832,7 +854,7 @@ final class PlayerController: ObservableObject {
     /// connection at the track boundary doesn't stop the music.
     private func schedulePrefetch() {
         prefetchTask?.cancel()
-        guard !offlineMode, networkUp else { return }
+        guard !offlineMode, networkUp, settings.prefetchNext else { return }
         prefetchTask = Task {
             try? await Task.sleep(nanoseconds: 5_000_000_000)
             guard !Task.isCancelled, !self.offlineMode else { return }

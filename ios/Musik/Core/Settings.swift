@@ -37,6 +37,13 @@ final class Settings: @unchecked Sendable {
         set { defaults.set(newValue, forKey: "mobileStream") }
     }
 
+    /// Download the next couple of tracks ahead of time (keeps the music going when the
+    /// connection drops at a track boundary); off = stream only what plays now.
+    var prefetchNext: Bool {
+        get { defaults.object(forKey: "prefetchNext") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "prefetchNext") }
+    }
+
     /// Stable per-install id sent with playback events.
     var clientId: String {
         if let id = defaults.string(forKey: "clientId") { return id }

@@ -192,66 +192,64 @@ struct NowPlayingView: View {
         .foregroundStyle(.primary)
     }
 
+    /// Two rows under the transport: rate / save, then explore.
     private func actions(_ track: Track) -> some View {
-        VStack(spacing: 10) {
+        let artist = track.artist.nonEmpty
+        let artistFav = artist.map { app.favoriteArtists.contains($0) } ?? false
+        return VStack(spacing: 10) {
             HStack(spacing: 10) {
                 Button { player.like() } label: {
                     Image(systemName: player.isFavorite ? "heart.fill" : "heart")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle(active: player.isFavorite))
                 .accessibilityLabel("Любимая")
 
-                Button { player.dislike() } label: {
+                // a second tap takes the dislike back
+                Button { player.disliked ? player.undislike() : player.dislike() } label: {
                     Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle(active: player.disliked))
-                .disabled(player.disliked)
-                .accessibilityLabel("Дизлайк")
+                .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк")
 
                 Button {
                     if offline.isSaved(track.id) { offline.remove(track.id) } else { offline.save(track) }
                 } label: {
-                    if offline.downloading.contains(track.id) {
-                        ProgressView().controlSize(.small)
-                    } else {
-                        Image(systemName: offline.isSaved(track.id) ? "arrow.down.circle.fill" : "arrow.down.circle")
+                    Group {
+                        if offline.downloading.contains(track.id) {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Image(systemName: offline.isSaved(track.id) ? "arrow.down.circle.fill" : "arrow.down.circle")
+                        }
                     }
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle(active: offline.isSaved(track.id)))
                 .accessibilityLabel("Сохранить на телефон")
-
-                Button { Task { await app.addLater(track.id) } } label: {
-                    Label("Потом", systemImage: "clock")
-                }
-                .buttonStyle(GlassChipStyle())
-
-                Button { player.playSimilarNow() } label: {
-                    Label("Похожее", systemImage: "sparkles")
-                }
-                .buttonStyle(GlassChipStyle())
             }
             HStack(spacing: 10) {
-                if let artist = track.artist.nonEmpty {
-                    Button { Task { await app.toggleFavoriteArtist(artist) } } label: {
-                        Label("артист", systemImage: app.favoriteArtists.contains(artist) ? "heart.fill" : "heart")
-                    }
-                    .buttonStyle(GlassChipStyle(active: app.favoriteArtists.contains(artist)))
+                Button { player.playSimilarNow() } label: {
+                    Label("Похожее", systemImage: "sparkles").frame(maxWidth: .infinity)
                 }
-                if let album = track.album.nonEmpty {
-                    let fav = app.favoriteAlbums.contains(albumKey(track.artist, album))
-                    Button { Task { await app.toggleFavoriteAlbum(artist: track.artist, album: album) } } label: {
-                        Label("альбом", systemImage: fav ? "heart.fill" : "heart")
-                    }
-                    .buttonStyle(GlassChipStyle(active: fav))
+                .buttonStyle(GlassChipStyle())
+
+                Button {
+                    if let artist { Task { await app.toggleFavoriteArtist(artist) } }
+                } label: {
+                    Label("Артист", systemImage: artistFav ? "heart.fill" : "heart").frame(maxWidth: .infinity)
                 }
+                .buttonStyle(GlassChipStyle(active: artistFav))
+                .disabled(artist == nil)
+
                 Button { player.startRadio(seed: track.id) } label: {
-                    Label("Радио", systemImage: "dot.radiowaves.left.and.right")
+                    Label("Радио", systemImage: "dot.radiowaves.left.and.right").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle())
             }
         }
         .labelStyle(.titleAndIcon)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 20)
     }
 
     @ViewBuilder
