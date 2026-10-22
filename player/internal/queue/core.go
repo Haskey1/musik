@@ -25,11 +25,20 @@ type CoreOpts struct {
 	Now         time.Time
 	Model       *Model
 	Negative    func([]float32) float64
-	DaypartName string
-	ContextIDs  []string
-	Discover    bool
-	Allocation  *ExploreDecision
+	// ClusterPenalty is 0..1 per cluster skipped in this session; see clusterPenaltyWeight.
+	ClusterPenalty func(cluster int) float64
+	DaypartName    string
+	ContextIDs     []string
+	Discover       bool
+	// Shifted: the listener keeps skipping away; widen source quotas (ShiftQuotas).
+	Shifted    bool
+	Allocation *ExploreDecision
 }
+
+// clusterPenaltyWeight: a cluster the listener keeps skipping loses this much score
+// at full penalty, more than the model gives a perfect taste match, so skips actually
+// move the radio instead of only nudging it.
+const clusterPenaltyWeight = 1.5
 
 func (b *Builder) BuildCore(opts CoreOpts) []Item {
 	if opts.Size < 1 {
@@ -99,10 +108,28 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 			NegativePenalty: neg,
 		})
 		score := model.Score(values) - 0.35*downrank
+		if opts.ClusterPenalty != nil && meta.ClusterID >= 0 {
+			score -= clusterPenaltyWeight * opts.ClusterPenalty(meta.ClusterID)
+		}
 		cand.Primary = primarySource(cand.Sources)
 		scored = append(scored, ScoredCandidate{
 			Candidate: cand, Score: score, Features: values, Downrank: downrank,
 		})
+	}
+
+	if opts.Shifted && opts.ClusterPenalty != nil {
+		// a cluster the listener has clearly left is dropped, as long as enough other music remains
+		kept := make([]ScoredCandidate, 0, len(scored))
+		for _, c := range scored {
+			meta := b.Idx.MetaAt(c.Row)
+			if meta.ClusterID >= 0 && opts.ClusterPenalty(meta.ClusterID) >= 0.7 {
+				continue
+			}
+			kept = append(kept, c)
+		}
+		if len(kept) >= opts.Size {
+			scored = kept
+		}
 	}
 
 	quotas := coreQuotas(opts)
@@ -147,6 +174,9 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 }
 
 func coreQuotas(opts CoreOpts) map[string]Quota {
+	if opts.Shifted {
+		return ShiftQuotas
+	}
 	if opts.Allocation != nil && opts.Allocation.Quotas != nil {
 		return opts.Allocation.Quotas
 	}

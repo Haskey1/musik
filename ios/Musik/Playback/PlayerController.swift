@@ -280,7 +280,15 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    func skip() {
+    /// «Другое»: skips the track and tells the server this kind of music is not wanted now,
+    /// so it rebuilds the queue away from it. Radio only; the already downloaded next
+    /// track belongs to the old mood, so the answer is waited for instead.
+    func changeMood() {
+        guard !offlineMode, !fixed else { return }
+        skip(reason: "mood_shift")
+    }
+
+    func skip(reason: String = "skipped") {
         crossfadeArmed = false
         stopFadeNow()
         if offlineMode {
@@ -288,15 +296,16 @@ final class PlayerController: ObservableObject {
             return
         }
         guard let track = current, sessionId != nil else { return }
-        if duration > 0, listened / duration < 0.3 { noteEarlySkip(track) }
-        if playAheadLocally(after: track, event: "skip", reason: "skipped") { return }
+        let mood = reason == "mood_shift"
+        if !mood, duration > 0, listened / duration < 0.3 { noteEarlySkip(track) }
+        if !mood, playAheadLocally(after: track, event: "skip", reason: reason) { return }
         generation += 1
         let req = nextRequest()
         player.pause()
         Task {
             defer { self.finish(req) }
             do {
-                let res = try await self.postEvent("skip", track: track, reason: "skipped",
+                let res = try await self.postEvent("skip", track: track, reason: reason,
                                                    retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)

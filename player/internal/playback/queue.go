@@ -266,18 +266,25 @@ func (e *Engine) RefreshQueue(sess *Session, currentID int64, reason string) {
 		Now: time.Now().UTC(), Rng: e.Builder.ForkRNG(),
 	})
 	model := e.Ranker
+	centroids := e.tasteCentroidVecs()
+	if aw := sess.TasteState.AnchorWeight(); aw >= 0.15 && len(sess.TasteState.Anchor) > 0 {
+		// the anchor competes for the candidate pool as one more taste centre
+		centroids = append([][]float32{sess.TasteState.Anchor}, centroids...)
+	}
 	built := e.Builder.BuildCore(queue.CoreOpts{
 		CurrentID: currentID, Taste: e.tasteForQueue(sess),
-		Session: sess.TasteState.Positive.Vector, Daypart: e.daypartVector(dp),
-		Centroids: e.tasteCentroidVecs(), Contexts: e.contextBlends(sess.ActiveContextIDs),
+		Session: sess.TasteState.SessionVector(), Daypart: e.daypartVector(dp),
+		Centroids: centroids, Contexts: e.contextBlends(sess.ActiveContextIDs),
 		Exclude: sess.Exclude, Rules: e.sessionRules(sess),
 		Transitions: e.transitionsFrom(currentID),
 		Profile:     queue.TransitionProfile(sess.TransitionProfile),
 		Size:        size, Model: &model,
 		Negative: func(vector []float32) float64 {
-			return e.TasteState.NegativePenalty(vector, &sess.TasteState)
+			return negativeBoost(sess, e.TasteState.NegativePenalty(vector, &sess.TasteState))
 		},
-		DaypartName: dp, ContextIDs: sess.ActiveContextIDs,
+		ClusterPenalty: sess.TasteState.ClusterPenalty,
+		Shifted:        sess.TasteState.Shifted() && shiftsRadio(sess),
+		DaypartName:    dp, ContextIDs: sess.ActiveContextIDs,
 		Discover: e.Discovering(), Allocation: &decision,
 	})
 	if reason != "" && sess.Mode != "share" {

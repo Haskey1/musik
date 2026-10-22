@@ -30,6 +30,17 @@ type SessionState struct {
 	Positive       VectorState         `json:"positive"`
 	Negative       []NegativePrototype `json:"negative,omitempty"`
 	RecentPositive [][]float32         `json:"recent_positive,omitempty"`
+	// Anchor is what the radio was started on (an artist or a track): it keeps
+	// pulling the queue towards it for the first tracks and fades out (see
+	// AnchorWeight), so "radio on Кино" stays Кино-like after the first song.
+	Anchor []float32 `json:"anchor,omitempty"`
+	// Plays counts the tracks heard (finished, partly or skipped) since the start.
+	Plays int `json:"plays,omitempty"`
+	// SkipStreak is the number of early skips in a row; any listened track resets it.
+	SkipStreak int `json:"skip_streak,omitempty"`
+	// SkipClusters counts early skips per cluster in this session: skipping a few
+	// tracks of one cluster means "not this kind of music right now".
+	SkipClusters map[int]int `json:"skip_clusters,omitempty"`
 }
 
 type State struct {
@@ -77,12 +88,28 @@ func (s *State) UpdatePositive(
 	daypart string,
 	session *SessionState,
 ) {
+	s.UpdatePositiveScaled(vector, weight, alpha, 1, daypart, session)
+}
+
+// UpdatePositiveScaled is UpdatePositive where the long-term and daypart tastes
+// learn longScale × weight while the session learns the full weight. A track the
+// radio itself picked says less about the listener's taste than one they chose,
+// but it is still a fair signal of the current mood.
+func (s *State) UpdatePositiveScaled(
+	vector []float32,
+	weight, alpha, longScale float64,
+	daypart string,
+	session *SessionState,
+) {
 	if len(vector) == 0 || weight <= 0 {
 		return
 	}
-	s.Long.UpdateEMA(vector, weight, alpha)
+	if longScale <= 0 || longScale > 1 {
+		longScale = 1
+	}
+	s.Long.UpdateEMA(vector, weight*longScale, alpha)
 	s.mu.Lock()
-	s.Dayparts[daypart] = updatePositive(s.Dayparts[daypart], vector, weight, alpha)
+	s.Dayparts[daypart] = updatePositive(s.Dayparts[daypart], vector, weight*longScale, alpha)
 	s.mu.Unlock()
 	if session != nil {
 		session.Positive = updatePositive(session.Positive, vector, weight, alpha)
@@ -211,14 +238,22 @@ func (s *State) Effective(daypart string, session *SessionState, daypartMinimum 
 		}
 		return nil
 	}
+	// A run of skips and a fresh anchor both say "not what you usually listen to":
+	// the long-term and daypart parts are turned down, the session parts stay.
+	scale := 1.0
+	if session != nil {
+		scale = session.LongScale()
+	}
 	out := make([]float32, len(long))
-	copy(out, long)
-	total := float32(1)
+	for i := range out {
+		out[i] = float32(scale) * long[i]
+	}
+	total := float32(scale)
 	if dp.Samples >= daypartMinimum && len(dp.Vector) == len(out) {
 		for i := range out {
-			out[i] += 0.4 * dp.Vector[i]
+			out[i] += 0.4 * float32(scale) * dp.Vector[i]
 		}
-		total += 0.4
+		total += 0.4 * float32(scale)
 	}
 	if session != nil && len(session.Positive.Vector) == len(out) {
 		for i := range out {
@@ -237,11 +272,59 @@ func (s *State) Effective(daypart string, session *SessionState, daypartMinimum 
 			total += 0.25
 		}
 	}
+	if session != nil {
+		if w := float32(AnchorStrength * session.AnchorWeight()); w > 0 && len(session.Anchor) == len(out) {
+			for i := range out {
+				out[i] += w * session.Anchor[i]
+			}
+			total += w
+		}
+	}
 	for i := range out {
 		out[i] /= total
 	}
 	index.Normalize(out)
+	if session != nil {
+		rejectNegatives(out, session.Negative)
+	}
 	return out
+}
+
+// rejectNegatives takes what this session rejected out of the taste vector: the
+// component along every negative prototype is removed, the more the more mass the
+// prototype has (one skip barely, three skips of the same kind almost completely).
+// Without this a taste made of one kind of music keeps asking for it however often
+// it is skipped, because nothing else is left in the vector to ask for.
+func rejectNegatives(vector []float32, prototypes []NegativePrototype) {
+	if len(prototypes) == 0 {
+		return
+	}
+	original := append([]float32(nil), vector...)
+	for _, p := range prototypes {
+		if len(p.Vector) != len(vector) {
+			continue
+		}
+		gamma := math.Min(0.95, 0.05+0.12*p.Mass*p.Mass)
+		if gamma <= 0.06 {
+			continue
+		}
+		along := float64(dot(vector, p.Vector))
+		if along <= 0 {
+			continue
+		}
+		for i := range vector {
+			vector[i] -= float32(gamma * along * float64(p.Vector[i]))
+		}
+	}
+	var norm float64
+	for _, x := range vector {
+		norm += float64(x) * float64(x)
+	}
+	if norm < 1e-12 {
+		copy(vector, original) // nothing is left: better the old taste than no direction
+		return
+	}
+	index.Normalize(vector)
 }
 
 func (s *State) NegativePenalty(vector []float32, session *SessionState) float64 {

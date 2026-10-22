@@ -99,6 +99,18 @@ struct NowPlayingView: View {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold))
             }
+            // radio only: «not this mood» — skips and steers the radio elsewhere
+            if !player.fixed && !player.offlineMode {
+                Button {
+                    Haptics.press()
+                    player.changeMood()
+                } label: {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.title3.weight(.semibold))
+                }
+                .disabled(player.busy)
+                .padding(.leading, 14)
+                .accessibilityLabel("Другое настроение")
+            }
             Spacer()
             if let track = player.current {
                 if let url = app.shareURL(track: track) {
