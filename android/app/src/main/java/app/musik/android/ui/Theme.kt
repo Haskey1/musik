@@ -33,6 +33,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.LocalContentColor
@@ -136,13 +137,20 @@ fun ChipButton(onClick: () -> Unit, modifier: Modifier = Modifier, active: Boole
 
 /** Frosted white chip for the cover-coloured player background. */
 @Composable
-fun GlassChip(onClick: () -> Unit, modifier: Modifier = Modifier, active: Boolean = false, enabled: Boolean = true, content: @Composable RowScope.() -> Unit) {
+fun GlassChip(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    active: Boolean = false,
+    enabled: Boolean = true,
+    horizontalPadding: Dp = 16.dp,
+    content: @Composable RowScope.() -> Unit,
+) {
     val fill = Color.White.copy(alpha = if (active) 0.3f else 0.12f)
     PillButton(
         onClick, modifier, enabled,
         background = Brush.linearGradient(listOf(fill, fill)),
         border = Color.White.copy(alpha = if (active) 0.55f else 0.14f),
-        contentColor = Color.White, content = content,
+        contentColor = Color.White, horizontalPadding = horizontalPadding, content = content,
     )
 }
 
@@ -154,6 +162,7 @@ private fun PillButton(
     background: Brush,
     border: Color?,
     contentColor: Color,
+    horizontalPadding: Dp = 16.dp,
     content: @Composable RowScope.() -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -165,7 +174,7 @@ private fun PillButton(
             .background(background, CircleShape)
             .let { if (border != null) it.border(1.dp, border, CircleShape) else it }
             .clickable(interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 11.dp),
+            .padding(horizontal = horizontalPadding, vertical = 11.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
     ) {

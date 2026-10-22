@@ -40,6 +40,7 @@ class MusikApp : Application(), ImageLoaderFactory {
         player = PlayerController(this, api, settings, offline, state)
 
         offline.toast = { state.show(it) }
+        offline.holdAutoDownloads = { player.isBuffering || player.busy }
         state.onSignedIn = { player.restore() }
         state.onSignedOut = { clear ->
             player.stop(clear)

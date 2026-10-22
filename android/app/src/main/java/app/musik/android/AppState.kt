@@ -166,17 +166,25 @@ class AppState(
         favoriteAlbums = (fav.albums ?: emptyList()).map { it.key }.toSet()
     }
 
-    /** Toggles a track heart; returns the new state, or null on error. */
-    suspend fun toggleFavoriteTrack(track: Track): Boolean? = try {
-        val r = api.toggleFavorite(jsonBody("type" to "track", "track_id" to track.id))
-        favoriteTracks = if (r.favorited) favoriteTracks + track.id else favoriteTracks - track.id
-        onFavoriteChanged(track, r.favorited)
-        show(if (r.favorited) "Любимая песня" else "Песня убрана из любимых")
-        homeRevision++
-        r.favorited
-    } catch (e: Exception) {
-        show(e)
-        null
+    /**
+     * Toggles a track heart; returns the new state, or null on error.
+     * The heart flips at once and goes back if the server refuses.
+     */
+    suspend fun toggleFavoriteTrack(track: Track): Boolean? {
+        val before = track.id in favoriteTracks
+        favoriteTracks = if (before) favoriteTracks - track.id else favoriteTracks + track.id
+        return try {
+            val r = api.toggleFavorite(jsonBody("type" to "track", "track_id" to track.id))
+            favoriteTracks = if (r.favorited) favoriteTracks + track.id else favoriteTracks - track.id
+            onFavoriteChanged(track, r.favorited)
+            show(if (r.favorited) "Любимая песня" else "Песня убрана из любимых")
+            homeRevision++
+            r.favorited
+        } catch (e: Exception) {
+            favoriteTracks = if (before) favoriteTracks + track.id else favoriteTracks - track.id
+            show(e)
+            null
+        }
     }
 
     fun toggleFavoriteArtist(artist: String) = perform {

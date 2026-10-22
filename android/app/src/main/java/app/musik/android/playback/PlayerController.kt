@@ -186,10 +186,14 @@ class PlayerController(
     private var probeJob: Job? = null
     private var stallJob: Job? = null
     private var prefetchJob: Job? = null
+    private var graceJob: Job? = null
 
     companion object {
         /** How long to wait for the server before playing from the phone instead. */
         private const val EVENT_TIMEOUT = 7L
+
+        /** A short blip of the connection must not throw the listener out of the radio: wait this long first. */
+        private const val OFFLINE_GRACE_MS = 6_000L
     }
 
     init {
@@ -292,7 +296,7 @@ class PlayerController(
                 // Asked for music with no server in reach: play what is saved on the phone.
                 if (isNetwork(e) && offline.saved.isNotEmpty()) {
                     offlineMode = false
-                    enterOfflineFallback()
+                    enterOfflineFallback(retry = { start(request) })
                 } else {
                     app.show(e)
                 }
@@ -373,14 +377,16 @@ class PlayerController(
         exo.seekTo((target * 1000).toLong())
     }
 
-    fun skip() {
+    fun skip() = skipTrack(countEarly = true)
+
+    private fun skipTrack(countEarly: Boolean) {
         if (offlineMode) {
             offlineStep(+1)
             return
         }
         val track = current ?: return
         if (sessionId == null) return
-        if (duration > 0 && listened / duration < 0.3) noteEarlySkip(track)
+        if (countEarly && duration > 0 && listened / duration < 0.3) noteEarlySkip(track)
         if (playAheadLocally(track, "skip", "skipped")) return
         val req = nextRequest()
         exo.pause()
@@ -393,7 +399,7 @@ class PlayerController(
             } catch (e: Exception) {
                 if (req != requestSeq) return@launch
                 if (isNetwork(e)) {
-                    enterOfflineFallback()
+                    enterOfflineFallback(retry = { skipTrack(countEarly = false) })
                 } else {
                     app.show(e)
                     exo.play()
@@ -405,6 +411,7 @@ class PlayerController(
     }
 
     private fun nextRequest(): Int {
+        graceJob?.cancel()
         requestSeq++
         busy = true
         return requestSeq
@@ -454,7 +461,7 @@ class PlayerController(
             } catch (e: Exception) {
                 if (req != requestSeq) return@launch
                 // No server to ask for the next track: carry on from the phone.
-                if (isNetwork(e)) enterOfflineFallback() else app.show(e)
+                if (isNetwork(e)) enterOfflineFallback(retry = { trackFinished() }) else app.show(e)
             }
         }
     }
@@ -521,18 +528,24 @@ class PlayerController(
 
     val isFavorite: Boolean get() = current?.id?.let { it in app.favoriteTracks } ?: false
 
-    /** ♥ = favorite toggle; a fresh heart also sends a `like` event (as the web UI does). */
+    /**
+     * ♥ = favorite toggle; a fresh heart also sends a `like` event (as the web UI does).
+     * The heart, the pulse and the vibration react at once; the server is asked in the background.
+     */
     fun like() {
         val track = current ?: return
+        val willLike = track.id !in app.favoriteTracks
+        if (willLike) {
+            likeTick++
+            Haptics.like(context, settings)
+        } else {
+            Haptics.tick(context, settings)
+        }
         scope.launch {
             val liked = app.toggleFavoriteTrack(track)
             if (liked == true) {
-                likeTick++
-                Haptics.like(context, settings)
                 ArtistSkips.reset(settings, track.artist)
                 runCatching { postEvent("like", track) }.getOrNull()?.let { applyLists(it) }
-            } else if (liked == false) {
-                Haptics.tick(context, settings)
             }
         }
     }
@@ -886,6 +899,7 @@ class PlayerController(
 
     fun stop(clearSession: Boolean) {
         requestSeq++
+        graceJob?.cancel()
         crossfadePending = false
         abortFade()
         exo.stop()
@@ -958,7 +972,37 @@ class PlayerController(
      * The server can't be reached mid-listening: continue with what is on the phone —
      * first the upcoming tracks already prefetched, then saved tracks in random order.
      */
-    private fun enterOfflineFallback(keepCurrent: Boolean = false) {
+    private fun enterOfflineFallback(keepCurrent: Boolean = false, retry: (() -> Unit)? = null) {
+        if (offlineMode || graceJob?.isActive == true) return
+        graceJob = scope.launch {
+            // Wait a little first: the server often answers again within seconds, and then
+            // the listener stays in the radio instead of being switched to the saved tracks.
+            val deadline = SystemClock.uptimeMillis() + OFFLINE_GRACE_MS
+            while (isActive && SystemClock.uptimeMillis() < deadline) {
+                delay(1_500)
+                if (offlineMode) return@launch
+                if (networkUp && api.ping()) {
+                    recoverAfterBlip(retry)
+                    return@launch
+                }
+            }
+            if (!offlineMode) goOfflineNow(keepCurrent)
+        }
+    }
+
+    /** The server is back: redo what failed, or restart the stream that gave up. */
+    private fun recoverAfterBlip(retry: (() -> Unit)?) {
+        if (retry != null) {
+            retry()
+            return
+        }
+        if (current != null && (exo.playerError != null || exo.playbackState == Player.STATE_IDLE)) {
+            exo.prepare()
+            exo.playWhenReady = true
+        }
+    }
+
+    private fun goOfflineNow(keepCurrent: Boolean) {
         if (offlineMode) return
         // the prefetched upcoming tracks and the saved ones, no duplicates, no current track, all shuffled
         val seen = mutableSetOf<Int>()
@@ -1099,7 +1143,7 @@ class PlayerController(
         val id = current?.id ?: return
         if (offlineMode || offline.playableFile(id) != null) return
         stallJob = scope.launch {
-            delay(4_000)
+            delay(2_000)
             if (!isBuffering || offlineMode) return@launch
             if (!networkUp) {
                 enterOfflineFallback()
@@ -1167,19 +1211,23 @@ class PlayerController(
 
         override fun isCommandAvailable(command: Int) = availableCommands.contains(command)
 
-        // The wrapped player reports its own commands (no "next" with one item); keep ours.
+        // The wrapped player reports its own commands (no "next" with one item). Listeners are
+        // registered untouched, so every player event reaches the session; right after each
+        // commands event a second listener restates ours.
         override fun addListener(listener: Player.Listener) {
-            val wrapped = object : Player.Listener by listener {
+            super.addListener(listener)
+            val restate = object : Player.Listener {
                 override fun onAvailableCommandsChanged(availableCommands: Player.Commands) {
                     listener.onAvailableCommandsChanged(this@SessionPlayer.availableCommands)
                 }
             }
-            wrappers[listener] = wrapped
-            super.addListener(wrapped)
+            wrappers[listener] = restate
+            super.addListener(restate)
         }
 
         override fun removeListener(listener: Player.Listener) {
-            super.removeListener(wrappers.remove(listener) ?: listener)
+            super.removeListener(listener)
+            wrappers.remove(listener)?.let { super.removeListener(it) }
         }
 
         override fun seekToNext() = skip()

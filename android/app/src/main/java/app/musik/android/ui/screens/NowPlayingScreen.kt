@@ -400,14 +400,14 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
             pulse.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 700f))
         }
     }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GlassChip(onClick = { player.dislike() }, cell(), active = player.disliked) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassChip(onClick = { player.dislike() }, cell(), horizontalPadding = 8.dp, active = player.disliked) {
                 Icon(if (player.disliked) Icons.Filled.HeartBroken else Icons.Outlined.HeartBroken, if (player.disliked) "Снять дизлайк" else "Дизлайк", Modifier.size(22.dp))
             }
             GlassChip(
                 onClick = { if (offline.isSaved(track.id)) offline.remove(track.id) else offline.save(track) },
-                cell(), active = offline.isSaved(track.id),
+                cell(), horizontalPadding = 8.dp, active = offline.isSaved(track.id),
             ) {
                 when {
                     track.id in offline.downloading -> CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
@@ -415,7 +415,7 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
                     else -> Icon(Icons.Outlined.DownloadForOffline, "Сохранить на телефон", Modifier.size(22.dp))
                 }
             }
-            GlassChip(onClick = { player.like() }, cell(), active = favorite) {
+            GlassChip(onClick = { player.like() }, cell(), horizontalPadding = 8.dp, active = favorite) {
                 Icon(
                     if (favorite) Icons.Filled.Favorite else Icons.Outlined.FavoriteBorder, "Любимая",
                     Modifier.size(22.dp).graphicsLayer { scaleX = pulse.value; scaleY = pulse.value },
@@ -423,15 +423,15 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
                 )
             }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            GlassChip(onClick = { player.playSimilarNow() }, cell()) {
-                Icon(Icons.Filled.AutoAwesome, null, Modifier.size(18.dp)); Text("Похожее", maxLines = 1)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassChip(onClick = { player.playSimilarNow() }, cell(), horizontalPadding = 8.dp) {
+                Icon(Icons.Filled.AutoAwesome, null, Modifier.size(16.dp)); Text("Похожее", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
-            GlassChip(onClick = onLyrics, cell(), active = lyricsOn) {
-                Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(18.dp)); Text("Текст", maxLines = 1)
+            GlassChip(onClick = onLyrics, cell(), horizontalPadding = 8.dp, active = lyricsOn) {
+                Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(16.dp)); Text("Текст", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
-            GlassChip(onClick = { player.startRadio(seed = track.id) }, cell()) {
-                Icon(Icons.Filled.Radio, null, Modifier.size(18.dp)); Text("Радио", maxLines = 1)
+            GlassChip(onClick = { player.startRadio(seed = track.id) }, cell(), horizontalPadding = 8.dp) {
+                Icon(Icons.Filled.Radio, null, Modifier.size(16.dp)); Text("Радио", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
         }
     }

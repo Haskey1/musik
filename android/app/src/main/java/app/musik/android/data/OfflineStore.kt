@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -58,6 +59,9 @@ class OfflineStore(context: Context, private val api: Api, private val settings:
         private set
 
     var toast: (String) -> Unit = {}
+
+    /** While this is true (the player is buffering or starting a track) automatic downloads wait. */
+    var holdAutoDownloads: () -> Boolean = { false }
 
     private val scope = MainScope()
     private val savedDir = File(context.filesDir, "offline").apply { mkdirs() }
@@ -144,6 +148,11 @@ class OfflineStore(context: Context, private val api: Api, private val settings:
         worker = scope.launch {
             while (pending.isNotEmpty()) {
                 val (track, auto) = pending.removeFirst()
+                if (auto) {
+                    // a like must not compete with the track that is playing for the connection
+                    delay(3_000)
+                    while (holdAutoDownloads()) delay(1_500)
+                }
                 downloading = downloading + track.id
                 download(track, auto)
                 downloading = downloading - track.id
