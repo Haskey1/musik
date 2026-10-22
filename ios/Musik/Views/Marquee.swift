@@ -2,6 +2,9 @@ import SwiftUI
 
 /// One line of text that holds still when it fits and slowly scrolls to its end and back
 /// when it doesn't (a running line). The right edge fades while it is too long.
+///
+/// The moving text lives in an overlay: however long it is, it never changes the size of
+/// the view, so a long title can't stretch the screen it sits on.
 struct MarqueeText: View {
     let text: String
     var font: Font = .subheadline
@@ -13,20 +16,29 @@ struct MarqueeText: View {
     private var overflow: CGFloat { max(0, textWidth - boxWidth) }
 
     var body: some View {
-        Text(text)
+        // an invisible line gives the view its height and takes the width it is offered
+        Text("Ag")
             .font(font)
             .lineLimit(1)
-            .fixedSize()
-            .background(GeometryReader { geo in
-                Color.clear.onAppear { textWidth = geo.size.width }
-                    .onChange(of: geo.size.width) { textWidth = $0 }
-            })
-            .offset(x: offset)
+            .hidden()
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(GeometryReader { geo in
-                Color.clear.onAppear { boxWidth = geo.size.width }
+                Color.clear
+                    .onAppear { boxWidth = geo.size.width }
                     .onChange(of: geo.size.width) { boxWidth = $0 }
             })
+            .overlay(alignment: .leading) {
+                Text(text)
+                    .font(font)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .background(GeometryReader { geo in
+                        Color.clear
+                            .onAppear { textWidth = geo.size.width }
+                            .onChange(of: geo.size.width) { textWidth = $0 }
+                    })
+                    .offset(x: offset)
+            }
             .clipped()
             .mask(
                 LinearGradient(stops: [
@@ -40,8 +52,8 @@ struct MarqueeText: View {
 
     private func run() async {
         offset = 0
-        let distance = overflow + 16
         guard overflow > 1 else { return }
+        let distance = overflow + 16
         let seconds = Double(distance) / 30
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
