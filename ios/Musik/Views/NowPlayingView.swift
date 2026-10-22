@@ -78,7 +78,10 @@ struct NowPlayingView: View {
             } else {
                 VStack(spacing: 12) {
                     Text("Ничего не играет").font(.title3.weight(.semibold))
-                    Button("Включить радио") { player.startRadio() }
+                    Button("Включить радио") {
+                        Haptics.press()
+                        player.startRadio()
+                    }
                         .buttonStyle(PrimaryButtonStyle())
                 }
             }
@@ -176,6 +179,7 @@ struct NowPlayingView: View {
             .foregroundStyle(Color.white.opacity(0.7))
             .lineLimit(1)
             .padding(.horizontal, 8)
+            TrackInfoLine(trackId: track.id)
             if let source = Labels.source(track.source) {
                 Text(source)
                     .font(.caption2.weight(.semibold))
@@ -190,10 +194,16 @@ struct NowPlayingView: View {
 
     private var transport: some View {
         HStack(spacing: 44) {
-            Button { player.back() } label: {
+            Button {
+                Haptics.tap()
+                player.back()
+            } label: {
                 Image(systemName: "backward.fill").font(.title)
             }
-            Button { player.togglePlay() } label: {
+            Button {
+                Haptics.press()
+                player.togglePlay()
+            } label: {
                 ZStack {
                     Circle()
                         .fill(Color.white)
@@ -208,7 +218,10 @@ struct NowPlayingView: View {
                     }
                 }
             }
-            Button { player.skip() } label: {
+            Button {
+                Haptics.tap()
+                player.skip()
+            } label: {
                 Image(systemName: "forward.fill").font(.title)
             }
             .disabled(player.busy)
@@ -259,7 +272,10 @@ struct NowPlayingView: View {
                 }
                 .buttonStyle(GlassChipStyle(active: pane == .lyrics))
 
-                Button { player.startRadio(seed: track.id) } label: {
+                Button {
+                    Haptics.press()
+                    player.startRadio(seed: track.id)
+                } label: {
                     Label("Радио", systemImage: "dot.radiowaves.left.and.right").frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle())
@@ -448,6 +464,65 @@ struct LyricsView: View {
     }
 }
 
+
+/// Genre and file quality under the artist, faint: «Рэп · FLAC · 44,1 кГц».
+/// Comes from the track's passport on the server; empty while loading or offline.
+private struct TrackInfoLine: View {
+    @EnvironmentObject var app: AppState
+    let trackId: Int
+    @State private var text = ""
+
+    private struct Detail: Decodable { var passport: Passport? }
+    private struct Passport: Decodable {
+        var format: String?
+        var bitrate: Int?
+        var sampleRate: Int?
+        var genres: [String]?
+    }
+
+    private static var cache: [Int: String] = [:]
+
+    var body: some View {
+        // a blank line keeps the layout from jumping while the text loads
+        Text(text.isEmpty ? " " : text)
+            .font(.caption)
+            .foregroundStyle(Color.white.opacity(0.45))
+            .lineLimit(1)
+            .padding(.horizontal, 8)
+            .task(id: trackId) {
+                if let hit = Self.cache[trackId] { text = hit; return }
+                text = ""
+                guard let detail = try? await app.api.get("/api/tracks/\(trackId)", as: Detail.self) else { return }
+                let line = Self.describe(detail.passport)
+                Self.cache[trackId] = line
+                text = line
+            }
+    }
+
+    private static func describe(_ p: Passport?) -> String {
+        guard let p else { return "" }
+        var parts: [String] = []
+        let genres = (p.genres ?? []).filter { !$0.isEmpty }.prefix(2)
+        if !genres.isEmpty { parts.append(genres.joined(separator: ", ")) }
+        if let format = p.format, !format.isEmpty {
+            let lossless = ["FLAC", "WAV", "ALAC", "AIFF", "APE", "WV"].contains(format.uppercased())
+            if lossless {
+                parts.append(format + (p.sampleRate.map { " · " + khz($0) } ?? ""))
+            } else if let bitrate = p.bitrate, bitrate > 0 {
+                parts.append("\(format) · \(Int((Double(bitrate) / 1000).rounded())) кбит/с")
+            } else {
+                parts.append(format)
+            }
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func khz(_ hz: Int) -> String {
+        let k = Double(hz) / 1000
+        if k.truncatingRemainder(dividingBy: 1) == 0 { return "\(Int(k)) кГц" }
+        return String(format: "%.1f кГц", k).replacingOccurrences(of: ".", with: ",")
+    }
+}
 
 /// ♥ in the player: a fresh like makes the heart beat and fill with scarlet.
 private struct LikeChip: View {

@@ -180,6 +180,7 @@ struct ProfileView: View {
                 Button("Выйти", role: .destructive) { confirmLogout = true }
             }
         }
+        .resetScrollOnReselect(tab: 3)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
         .navigationTitle("Профиль")

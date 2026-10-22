@@ -73,6 +73,7 @@ struct DownloadsView: View {
             }
         }
         .listStyle(.plain)
+        .resetScrollOnReselect(tab: 2)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
         .navigationTitle("Сохранённые")

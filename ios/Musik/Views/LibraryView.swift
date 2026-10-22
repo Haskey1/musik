@@ -43,6 +43,7 @@ struct LibraryView: View {
             }
         }
         .listStyle(.plain)
+        .resetScrollOnReselect(tab: 1)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
         .navigationTitle("Библиотека")
@@ -130,50 +131,16 @@ struct LibraryView: View {
         }
     }
 
-    private func artistRow(_ a: ArtistItem) -> some View {
-        NavigationLink(value: Route.artist(a.artist)) {
-            HStack(spacing: 12) {
-                ArtistAvatar(artist: a.artist, coverTrackId: a.coverTrackId, size: 96, cornerRadius: 22)
-                    .frame(width: 44, height: 44)
-                VStack(alignment: .leading) {
-                    Text(a.artist).lineLimit(1)
-                    Text("\(a.tracks ?? 0) треков").font(.caption).foregroundStyle(Theme.muted)
-                }
-                Spacer()
-                if app.favoriteArtists.contains(a.artist) {
-                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
-                }
-            }
-        }
-        .listRowBackground(Color.clear)
-    }
+    private func artistRow(_ a: ArtistItem) -> some View { ArtistListRow(artist: a) }
 
-    private func albumRow(_ a: AlbumItem) -> some View {
-        NavigationLink(value: Route.album(artist: a.artist, album: a.album)) {
-            HStack(spacing: 12) {
-                ArtworkView(trackId: a.coverTrackId, size: 96, fallback: a.album, cornerRadius: 6)
-                    .frame(width: 44, height: 44)
-                VStack(alignment: .leading) {
-                    Text(a.album).lineLimit(1)
-                    Text([a.artist ?? "", "\(a.tracks ?? 0) треков", a.game == true ? "OST" : ""]
-                        .filter { !$0.isEmpty }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
-                }
-                Spacer()
-                if app.isFavorite(album: a) {
-                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
-                }
-            }
-        }
-        .listRowBackground(Color.clear)
-    }
+    private func albumRow(_ a: AlbumItem) -> some View { AlbumListRow(album: a) }
 
     @ViewBuilder
     private var favoritesSection: some View {
         let favTracks = (favorites.tracks ?? []).map(\.asTrack).filter { matchesTrack($0) }
         Section("Песни") {
             ForEach(favTracks) { t in
-                TrackRow(track: t) { player.playMix("favorites", startTrackId: t.id) }
+                TrackRow(track: t, unlikable: true) { player.playMix("favorites", startTrackId: t.id) }
             }
             if favTracks.isEmpty { EmptyHint(text: "Жми ♥ на треке") }
         }

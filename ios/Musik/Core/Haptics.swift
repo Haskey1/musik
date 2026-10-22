@@ -19,7 +19,14 @@ enum Haptics {
         }
     }
 
-    /// Any other toggle (unlike, dislike).
+    /// Play / pause, starting the radio: a firmer tap.
+    static func press() {
+        guard enabled else { return }
+        medium.prepare()
+        medium.impactOccurred(intensity: 0.8)
+    }
+
+    /// Any other toggle (unlike, dislike), skipping.
     static func tap() {
         guard enabled else { return }
         light.prepare()

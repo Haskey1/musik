@@ -17,6 +17,7 @@ type TrackPassport struct {
 	BPM        *float64 `json:"bpm,omitempty"`
 	Key        string   `json:"key,omitempty"`
 	Mode       string   `json:"mode,omitempty"`
+	Genres     []string `json:"genres,omitempty"`
 }
 
 // TrackPassport returns nil when the track does not exist.
@@ -45,6 +46,18 @@ WHERE t.id = ?`, id).Scan(&path, &bitrate, &rate, &chans, &lufs, &bpm, &keyName,
 		Channels:   chans.Int64,
 		Key:        keyName.String,
 		Mode:       mode.String,
+	}
+	// genres are decoration: a missing table or an empty result just means none
+	if rows, err := s.DB.Query(`
+SELECT g.name FROM track_genres tg JOIN genres g ON g.id = tg.genre_id
+WHERE tg.track_id = ? ORDER BY g.name`, id); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if rows.Scan(&name) == nil && strings.TrimSpace(name) != "" {
+				p.Genres = append(p.Genres, strings.TrimSpace(name))
+			}
+		}
 	}
 	if lufs.Valid {
 		p.LUFS = &lufs.Float64

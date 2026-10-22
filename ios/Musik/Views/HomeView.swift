@@ -48,11 +48,24 @@ struct HomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("musik").font(.display(40))
-                Text(Labels.maturity(player.maturity ?? maturity))
-                    .font(.footnote)
-                    .foregroundStyle(Theme.teal)
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("musik").font(.display(40))
+                    Text(Labels.maturity(player.maturity ?? maturity))
+                        .font(.footnote)
+                        .foregroundStyle(Theme.teal)
+                }
+                Spacer()
+                NavigationLink(value: Route.search) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Color.white)
+                        .frame(width: 44, height: 44)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.14)))
+                }
+                .accessibilityLabel("Поиск")
+                .padding(.top, 4)
             }
             RadioCard()
             ScrollView(.horizontal, showsIndicators: false) {
@@ -287,6 +300,7 @@ private struct RadioCard: View {
 
     var body: some View {
         Button {
+            Haptics.press()
             if radioOn { player.togglePlay() } else { player.startRadio() }
         } label: {
             HStack(spacing: 16) {
@@ -303,12 +317,10 @@ private struct RadioCard: View {
 
                 VStack(alignment: .leading, spacing: 3) {
                     Text("Радио").font(.display(28))
-                    Text(subtitle)
-                        .font(.subheadline.weight(.medium))
+                    MarqueeText(text: subtitle, font: .subheadline.weight(.medium))
                         .opacity(0.85)
-                        .lineLimit(1)
                 }
-                Spacer(minLength: 8)
+                Spacer(minLength: 0)
                 Image(systemName: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 20, weight: .bold))
                     .foregroundStyle(Theme.accent)
@@ -334,7 +346,7 @@ private struct RadioCard: View {
         if radioOn, let t = player.current {
             return [t.displayTitle, t.artist.nonEmpty].compactMap { $0 }.joined(separator: " · ")
         }
-        return "Бесконечно и под твой вкус"
+        return "Музыка под твой вкус"
     }
 }
 

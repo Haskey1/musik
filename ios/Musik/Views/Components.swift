@@ -6,6 +6,7 @@ import UIKit
 enum Route: Hashable {
     case artist(String)
     case album(artist: String?, album: String)
+    case search
 }
 
 extension View {
@@ -14,6 +15,7 @@ extension View {
             switch route {
             case .artist(let name): ArtistDetailView(artist: name).miniPlayerSpace()
             case .album(let artist, let album): AlbumDetailView(artist: artist, album: album).miniPlayerSpace()
+            case .search: SearchView().miniPlayerSpace()
             }
         }
     }
@@ -154,6 +156,56 @@ struct AlbumCard: View {
 
 // MARK: - Rows
 
+/// An artist in a vertical list: avatar, name, track count, a heart when favourite.
+struct ArtistListRow: View {
+    @EnvironmentObject var app: AppState
+    let artist: ArtistItem
+
+    var body: some View {
+        NavigationLink(value: Route.artist(artist.artist)) {
+            HStack(spacing: 12) {
+                ArtistAvatar(artist: artist.artist, coverTrackId: artist.coverTrackId, size: 96, cornerRadius: 22)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading) {
+                    Text(artist.artist).lineLimit(1)
+                    Text("\(artist.tracks ?? 0) треков").font(.caption).foregroundStyle(Theme.muted)
+                }
+                Spacer()
+                if app.favoriteArtists.contains(artist.artist) {
+                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .listRowBackground(Color.clear)
+    }
+}
+
+/// An album in a vertical list: cover, title, artist · track count, a heart when favourite.
+struct AlbumListRow: View {
+    @EnvironmentObject var app: AppState
+    let album: AlbumItem
+
+    var body: some View {
+        NavigationLink(value: Route.album(artist: album.artist, album: album.album)) {
+            HStack(spacing: 12) {
+                ArtworkView(trackId: album.coverTrackId, size: 96, fallback: album.album, cornerRadius: 6)
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading) {
+                    Text(album.album).lineLimit(1)
+                    Text([album.artist ?? "", "\(album.tracks ?? 0) треков", album.game == true ? "OST" : ""]
+                        .filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
+                }
+                Spacer()
+                if app.isFavorite(album: album) {
+                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
+                }
+            }
+        }
+        .listRowBackground(Color.clear)
+    }
+}
+
 struct TrackRow: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
@@ -161,6 +213,8 @@ struct TrackRow: View {
     let track: Track
     var index: Int?
     var showArtwork = true
+    /// The heart is a button that takes the like back (the list of favourites).
+    var unlikable = false
     let action: () -> Void
 
     var body: some View {
@@ -185,7 +239,22 @@ struct TrackRow: View {
                 Spacer(minLength: 8)
                 SaveButton(track: track)
                 if app.favoriteTracks.contains(track.id) {
-                    Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
+                    if unlikable {
+                        Button {
+                            Haptics.tap()
+                            Task { await app.toggleFavoriteTrack(track.id, track: track) }
+                        } label: {
+                            Image(systemName: "heart.fill")
+                                .font(.body)
+                                .foregroundStyle(Theme.love)
+                                .frame(width: 34, height: 34)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Убрать из любимых")
+                    } else {
+                        Image(systemName: "heart.fill").font(.caption).foregroundStyle(Theme.accent)
+                    }
                 }
                 Text(formatTime(track.duration))
                     .font(.caption.monospacedDigit())
@@ -375,10 +444,10 @@ private struct SwipeToSkip: ViewModifier {
                 if axis == .horizontal {
                     let w = g.predictedEndTranslation.width
                     if w < -threshold {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.tap()
                         player.skip()
                     } else if w > threshold {
-                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        Haptics.tap()
                         player.back()
                     }
                     onSwiping?(false)

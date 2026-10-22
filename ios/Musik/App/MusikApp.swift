@@ -71,6 +71,16 @@ struct MainView: View {
                 .environmentObject(app.offline)
                 .presentationDragIndicator(.visible)
         }
+        .background(TabReselectObserver())
+        .onReceive(NotificationCenter.default.publisher(for: .tabReselected)) { note in
+            // tapping the current tab: first back to its root, then (already there) to the top
+            guard let i = note.object as? Int, i == selection, paths.indices.contains(i) else { return }
+            if paths[i].isEmpty {
+                NotificationCenter.default.post(name: .tabScrollToTop, object: i)
+            } else {
+                withAnimation { paths[i] = NavigationPath() }
+            }
+        }
         .onAppear { openPendingLink() }
         .onChange(of: app.pendingLink) { _ in openPendingLink() }
         .onChange(of: app.pendingRoute) { route in

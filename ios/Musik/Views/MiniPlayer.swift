@@ -18,12 +18,18 @@ struct MiniPlayer: View {
                         Text(track.displayArtist).font(.caption).foregroundStyle(Theme.muted).lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    Button { player.togglePlay() } label: {
+                    Button {
+                        Haptics.press()
+                        player.togglePlay()
+                    } label: {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(.title3)
                             .frame(width: 40, height: 40)
                     }
-                    Button { player.skip() } label: {
+                    Button {
+                        Haptics.tap()
+                        player.skip()
+                    } label: {
                         Image(systemName: "forward.fill")
                             .font(.title3)
                             .frame(width: 40, height: 40)
