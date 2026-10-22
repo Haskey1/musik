@@ -179,6 +179,13 @@ struct NowPlayingView: View {
                     Label("Похожее", systemImage: "sparkles")
                 }
                 .buttonStyle(ChipButtonStyle())
+
+                Button { player.changeMood() } label: {
+                    Label("Другое", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .buttonStyle(ChipButtonStyle())
+                .disabled(player.busy)
+                .accessibilityLabel("Другое настроение")
             }
             HStack(spacing: 10) {
                 if let artist = track.artist.nonEmpty {

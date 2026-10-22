@@ -195,7 +195,10 @@ final class PlayerController: ObservableObject {
         }
     }
 
-    func skip() {
+    /// "Другое настроение": skips the track and tells the server to leave this kind of music.
+    func changeMood() { skip(reason: "mood_shift") }
+
+    func skip(reason: String = "skipped") {
         guard let track = current, sessionId != nil else { return }
         generation += 1
         let req = nextRequest()
@@ -203,7 +206,7 @@ final class PlayerController: ObservableObject {
         Task {
             defer { self.finish(req) }
             do {
-                let res = try await self.postEvent("skip", track: track, reason: "skipped", retry: true)
+                let res = try await self.postEvent("skip", track: track, reason: reason, retry: true)
                 guard req == self.requestSeq, let res else { return }
                 self.advance(with: res)
             } catch {

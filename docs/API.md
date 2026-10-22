@@ -178,7 +178,7 @@ Content-Type: `application/json` (кроме stream/artwork и `POST /api/librar
   "position_sec": 12.5,
   "duration_sec": 240,
   "listened_sec": 12.5,
-  "reason": "completed|skipped|next"
+  "reason": "completed|skipped|next|mood_shift"
 }
 ```
 
@@ -192,6 +192,9 @@ Content-Type: `application/json` (кроме stream/artwork и `POST /api/librar
 Public share-radio не пишет owner events, transitions, taste или метрики.
 
 Ответ на skip/track_end: `{ok, next, queue, maturity, signed_weight, session_id, …}`.
+
+`reason: "mood_shift"` на `skip` — кнопка «Другое настроение»: радио уходит от текущего
+типа музыки, очередь пересобирается сразу.
 
 ## Сессии и вкус
 

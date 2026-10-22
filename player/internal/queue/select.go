@@ -30,6 +30,17 @@ var DiscoverQuotas = map[string]Quota{
 	SourceWildcard:        {Min: 1, Max: 2},
 }
 
+// ShiftQuotas open the queue to far-from-taste tracks; used while the listener is
+// visibly skipping away from the current kind of music.
+var ShiftQuotas = map[string]Quota{
+	SourceExploit:         {Min: 0, Max: 1},
+	SourceTransition:      {Min: 0, Max: 1},
+	SourceExploreAdjacent: {Min: 1, Max: 3},
+	SourceResurface:       {Min: 0, Max: 1},
+	SourceNewInLibrary:    {Min: 0, Max: 1},
+	SourceWildcard:        {Min: 1, Max: 4},
+}
+
 type ScoredCandidate struct {
 	Candidate
 	Score    float64

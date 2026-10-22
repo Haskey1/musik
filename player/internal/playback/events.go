@@ -172,19 +172,31 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 			}
 		}
 		signed, action := taste.WeightFromListen(listened, dur, reason)
+		// "another mood": the listener pressed the button, not just skipped a track
+		mood := ev.Type == "skip" && reason == "mood_shift"
+		cluster := -1
 		if row, ok := e.Idx.RowOf(ev.TrackID); ok {
 			vector := e.Idx.Vector(row)
-			if outcome == "finished" {
+			cluster = e.Idx.MetaAt(row).ClusterID
+			switch {
+			case mood:
+				sess.TasteState.ResetMood(vector, cluster)
+				signed = 0
+			case outcome == "finished":
 				if signed <= 0 {
 					signed = 1
 				}
-				e.TasteState.UpdatePositive(vector, signed, e.Cfg.TasteAlpha,
+				scale := longTasteScale(source)
+				e.TasteState.UpdatePositiveScaled(vector, signed, e.Cfg.TasteAlpha, scale,
 					db.DayPart(time.Now().Hour()), &sess.TasteState)
-				e.PersistTaste(vector, signed, e.Cfg.TasteAlpha)
-			} else if outcome == "early_skip" {
+				e.PersistTaste(vector, signed*scale, e.Cfg.TasteAlpha)
+				sess.TasteState.NoteListened(cluster, true)
+			case outcome == "early_skip":
 				e.TasteState.AddEarlySkip(&sess.TasteState, vector, 1-ratio)
+				sess.TasteState.NoteSkip(cluster)
 				signed = 0
-			} else {
+			default:
+				sess.TasteState.NoteListened(cluster, false)
 				signed = 0
 			}
 			_ = action
@@ -209,6 +221,11 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 		e.ObserveExploreOutcome(source, outcome, true)
 		e.ExcludeTrack(sess, ev.TrackID)
+		if shiftsRadio(sess) && (mood || (outcome == "early_skip" && sess.TasteState.ShiftsAway(cluster))) {
+			// the queue was built for the mood the listener has just rejected: rebuild
+			// it without the track they are leaving as the point of reference
+			e.RefreshQueue(sess, 0, "skip_shift")
+		}
 		nextID := e.Advance(sess)
 		return EventResult{
 			OK: true, IsEnd: true, SignedWeight: signed,

@@ -280,6 +280,9 @@ func (e *Engine) StartRadio(seed *int64) *Session {
 	startID := e.pickAllowedStart(sess, seed)
 	sess.Current = startID
 	sess.Prev = 0
+	if seed != nil {
+		e.anchorSession(sess, startID)
+	}
 	e.ExcludeTrack(sess, startID)
 	source := "radio_start"
 	if seed != nil {
@@ -297,6 +300,9 @@ func (e *Engine) StartSession(seed *int64) *Session {
 	startID := e.pickAllowedStart(sess, seed)
 	sess.Current = startID
 	sess.Prev = 0
+	if seed != nil {
+		e.anchorSession(sess, startID)
+	}
 	source := "radio_start"
 	if seed != nil {
 		source = "manual"
