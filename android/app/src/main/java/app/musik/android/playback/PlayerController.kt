@@ -379,7 +379,13 @@ class PlayerController(
 
     fun skip() = skipTrack(countEarly = true)
 
-    private fun skipTrack(countEarly: Boolean) {
+    /** «Другое»: the radio is not in the mood: skip with `mood_shift`, which is not an early-skip complaint. */
+    fun changeMood() {
+        if (offlineMode || fixed || current == null) return
+        skipTrack(countEarly = false, reason = "mood_shift")
+    }
+
+    private fun skipTrack(countEarly: Boolean, reason: String = "skipped") {
         if (offlineMode) {
             offlineStep(+1)
             return
@@ -387,19 +393,19 @@ class PlayerController(
         val track = current ?: return
         if (sessionId == null) return
         if (countEarly && duration > 0 && listened / duration < 0.3) noteEarlySkip(track)
-        if (playAheadLocally(track, "skip", "skipped")) return
+        if (reason == "skipped" && playAheadLocally(track, "skip", reason)) return
         val req = nextRequest()
         exo.pause()
         scope.launch {
             try {
-                val res = postEvent("skip", track, "skipped", retry = true, timeout = EVENT_TIMEOUT)
+                val res = postEvent("skip", track, reason, retry = true, timeout = EVENT_TIMEOUT)
                 if (req == requestSeq && res != null) advance(res)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 if (req != requestSeq) return@launch
                 if (isNetwork(e)) {
-                    enterOfflineFallback(retry = { skipTrack(countEarly = false) })
+                    enterOfflineFallback(retry = { skipTrack(countEarly = false, reason = reason) })
                 } else {
                     app.show(e)
                     exo.play()

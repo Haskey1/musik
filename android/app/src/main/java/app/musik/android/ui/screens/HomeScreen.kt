@@ -1,5 +1,11 @@
 package app.musik.android.ui.screens
 
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.filled.Search
+import app.musik.android.data.Haptics
+import app.musik.android.ui.Routes
+import app.musik.android.ui.ScrollToTopOnReselect
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -202,16 +208,24 @@ fun HomeScreen() {
         },
         modifier = Modifier.fillMaxSize(),
     ) {
+        val listState = rememberLazyListState()
+        ScrollToTopOnReselect(Routes.HOME) { listState.animateScrollToItem(0) }
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(26.dp),
         ) {
             item {
                 Column(Modifier.statusBarsPadding().padding(horizontal = 16.dp).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                    Column {
-                        Text("musik", style = displayStyle(40))
-                        Text(Labels.maturity(player.maturity ?: model.maturity), color = MusikColors.teal)
+                    Box(Modifier.fillMaxWidth()) {
+                        Column {
+                            Text("musik", style = displayStyle(40))
+                            Text(Labels.maturity(player.maturity ?: model.maturity), color = MusikColors.teal)
+                        }
+                        IconButton(onClick = { nav.openSearch() }, Modifier.align(Alignment.TopEnd)) {
+                            Icon(Icons.Filled.Search, "Поиск", Modifier.size(26.dp), tint = Color.White)
+                        }
                     }
                     RadioCard()
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -287,10 +301,12 @@ fun HomeScreen() {
  * The big «Радио» card. Radio playing = there is a current track, it is not a fixed list and not offline;
  * then a tap pauses / resumes it, otherwise it starts the radio.
  */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun RadioCard() {
     val player = App.player
     val radioPlaying = player.current != null && !player.fixed && !player.offlineMode
+    val context = LocalContext.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
     val scale by animateFloatAsState(if (pressed) 0.97f else 1f, spring(dampingRatio = 0.7f), label = "press")
@@ -303,6 +319,7 @@ private fun RadioCard() {
             .clip(shape)
             .background(Brush.linearGradient(listOf(Color(0xFFF29A55), Color(0xFFE07A3A), Color(0xFF9C3F1E))))
             .clickable(interaction, indication = null) {
+                Haptics.press(context, App.settings)
                 if (radioPlaying) player.togglePlay() else player.startRadio()
             }
             .padding(16.dp),
@@ -317,8 +334,9 @@ private fun RadioCard() {
             Text("Радио", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Black)
             val now = player.current?.takeIf { radioPlaying }
             Text(
-                if (now != null) listOfNotNull(now.displayTitle, now.artist.nonEmpty).joinToString(" · ") else "Бесконечно и под твой вкус",
-                color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                if (now != null) listOfNotNull(now.displayTitle, now.artist.nonEmpty).joinToString(" · ") else "Музыка под твой вкус",
+                Modifier.basicMarquee(iterations = Int.MAX_VALUE),
+                color = Color.White.copy(alpha = 0.85f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false,
             )
         }
         Box(Modifier.size(48.dp).background(Color.White, CircleShape), contentAlignment = Alignment.Center) {

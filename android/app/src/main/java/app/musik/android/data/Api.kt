@@ -251,6 +251,7 @@ class Api(private val settings: Settings) {
     suspend fun albums(limit: Int? = null): List<AlbumItem> =
         get<AlbumsResponse>("/api/albums", limit?.let { listOf("limit" to it.toString()) } ?: emptyList()).albums ?: emptyList()
 
+    suspend fun trackDetail(trackId: Int): TrackDetail = get("/api/tracks/$trackId")
     suspend fun lyrics(trackId: Int): Lyrics = get("/api/tracks/$trackId/lyrics")
 
     // MARK: Shelves

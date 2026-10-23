@@ -312,3 +312,15 @@ fun tracksWord(n: Int): String {
         else -> "$n треков"
     }
 }
+
+/** `GET /api/tracks/{id}`: only the passport is used (genre and file quality line in the player). */
+@Serializable
+data class TrackDetail(val passport: Passport? = null)
+
+@Serializable
+data class Passport(
+    val format: String? = null,
+    val bitrate: Int? = null,
+    @SerialName("sample_rate") val sampleRate: Int? = null,
+    val genres: List<String>? = null,
+)

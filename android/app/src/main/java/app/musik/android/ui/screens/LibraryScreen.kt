@@ -1,5 +1,9 @@
 package app.musik.android.ui.screens
 
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import app.musik.android.ui.Routes
+import app.musik.android.ui.ScrollToTopOnReselect
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -156,7 +160,9 @@ fun LibraryScreen() {
         onRefresh = { scope.launch { model.refreshing = true; model.load(); model.refreshing = false } },
         modifier = Modifier.fillMaxSize(),
     ) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        ScrollToTopOnReselect(Routes.LIBRARY) { listState.animateScrollToItem(0) }
+        LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
             item {
                 Column(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Библиотека", style = displayStyle(32))
@@ -331,9 +337,10 @@ private fun LazyListScope.favoritesSection(
     matches: (String?) -> Boolean,
     matchesTrack: (Track) -> Boolean,
 ) {
-    val tracks = (fav.tracks ?: emptyList()).map { it.asTrack() }.filter(matchesTrack)
+    // a heart taken back drops out of the list at once
+    val tracks = (fav.tracks ?: emptyList()).map { it.asTrack() }.filter { it.id in App.state.favoriteTracks }.filter(matchesTrack)
     item { SectionTitle("Песни") }
-    items(tracks) { t -> TrackRow(t) { App.player.playMix("favorites", startTrackId = t.id) } }
+    items(tracks, key = { it.id }) { t -> TrackRow(t, unlikable = true) { App.player.playMix("favorites", startTrackId = t.id) } }
     if (tracks.isEmpty()) item { EmptyHint("Жми ♥ на треке") }
     item { SectionTitle("Артисты") }
     val artists = (fav.artists ?: emptyList()).filter { matches(it.artist) }
@@ -348,4 +355,64 @@ private fun LazyListScope.favoritesSection(
 @Composable
 private fun SectionTitle(text: String) {
     Text(text, Modifier.padding(top = 14.dp, bottom = 4.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+}
+
+/** Search from the home screen: the same «Все» search as in the library, with a back arrow. */
+@Composable
+fun SearchScreen() {
+    val model = LibraryModel.shared
+    val nav = LocalNavigator.current
+    var segment by rememberSaveable { mutableStateOf(0) }
+    var query by rememberSaveable { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        if (!model.loaded) model.load()
+    }
+    val requester = remember { androidx.compose.ui.focus.FocusRequester() }
+    LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
+
+    val q = query.trim()
+    fun matches(s: String?) = q.isEmpty() || (s ?: "").contains(q, ignoreCase = true)
+    fun matchesTrack(t: Track) = matches(t.title) || matches(t.artist) || matches(t.album)
+
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+        item {
+            Row(
+                Modifier.statusBarsPadding().padding(top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                IconButton(onClick = { if (segment != 0) segment = 0 else nav.back() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад")
+                }
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it; segment = 0 },
+                    modifier = Modifier.weight(1f).focusRequester(requester),
+                    placeholder = { Text("Артисты, альбомы, треки", color = MusikColors.muted) },
+                    leadingIcon = { Icon(Icons.Filled.Search, null, tint = MusikColors.muted) },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Filled.Clear, "Очистить") }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedContainerColor = MusikColors.surface,
+                        unfocusedContainerColor = MusikColors.surface,
+                        focusedBorderColor = MusikColors.accent,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.08f),
+                        cursorColor = MusikColors.accent,
+                    ),
+                )
+            }
+        }
+        if (!model.loaded) {
+            item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MusikColors.accent) } }
+        }
+        when (segment) {
+            0 -> allSection(model, q, ::matches, ::matchesTrack) { segment = it }
+            1 -> tracksSection(model.tracks.filter(::matchesTrack), q, model.loaded)
+            2 -> artistsSection(model.artists.filter { matches(it.artist) })
+            else -> albumsSection(model.albums.filter { matches(it.album) || matches(it.artist) })
+        }
+    }
 }

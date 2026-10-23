@@ -1,5 +1,8 @@
 package app.musik.android.ui.screens
 
+import app.musik.android.data.Haptics
+import app.musik.android.data.Passport
+import androidx.compose.material.icons.filled.Cached
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
@@ -205,8 +208,16 @@ private fun TopBar(track: Track, onClose: () -> Unit, onEqualizer: () -> Unit) {
                 Text(Labels.maturity(player.maturity), style = MaterialTheme.typography.labelSmall, color = Color.White.copy(alpha = 0.8f), maxLines = 1)
             }
         }
-        IconButton(onClick = onClose, Modifier.align(Alignment.CenterStart)) {
-            Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", Modifier.size(30.dp), tint = Color.White)
+        Row(Modifier.align(Alignment.CenterStart), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onClose) {
+                Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", Modifier.size(30.dp), tint = Color.White)
+            }
+            // radio only: this track is not the mood, offer something different
+            if (!player.fixed && !player.offlineMode) {
+                IconButton(onClick = { Haptics.press(context, App.settings); player.changeMood() }, enabled = !player.busy) {
+                    Icon(Icons.Filled.Cached, "Другое", Modifier.size(22.dp), tint = Color.White)
+                }
+            }
         }
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { shareText(context, Links.track(App.settings.baseUrl, track)) }) {
@@ -290,6 +301,7 @@ private fun TitleBlock(track: Track) {
                 Text(al, Modifier.weight(1f, fill = false).clickable { nav.openAlbum(track.artist, al) }, color = faded, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+        TrackInfoLine(track.id)
         Labels.source(track.source)?.let { src ->
             Text(
                 src,
@@ -352,13 +364,15 @@ private fun SeekBar() {
 @Composable
 private fun Transport() {
     val player = App.player
+    val context = LocalContext.current
+    fun press() = Haptics.press(context, App.settings)
     Row(horizontalArrangement = Arrangement.spacedBy(36.dp), verticalAlignment = Alignment.CenterVertically) {
-        IconButton(onClick = { player.back() }, Modifier.size(56.dp)) {
+        IconButton(onClick = { press(); player.back() }, Modifier.size(56.dp)) {
             Icon(Icons.Filled.SkipPrevious, "Назад", Modifier.size(40.dp), tint = Color.White)
         }
         Box(
             Modifier.size(78.dp).shadow(10.dp, CircleShape).background(Color.White, CircleShape).clip(CircleShape)
-                .clickable { player.togglePlay() },
+                .clickable { press(); player.togglePlay() },
             contentAlignment = Alignment.Center,
         ) {
             if (player.isBuffering || player.busy) {
@@ -371,7 +385,7 @@ private fun Transport() {
                 )
             }
         }
-        IconButton(onClick = { player.skip() }, Modifier.size(56.dp), enabled = !player.busy) {
+        IconButton(onClick = { press(); player.skip() }, Modifier.size(56.dp), enabled = !player.busy) {
             Icon(Icons.Filled.SkipNext, "Дальше", Modifier.size(40.dp), tint = Color.White)
         }
     }
@@ -386,6 +400,7 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
     val player = App.player
     val state = App.state
     val offline = App.offline
+    val context = LocalContext.current
     // the heart comes from the shared list of favourites, so it follows a like made anywhere
     val favorite = track.id in state.favoriteTracks
     val heartColor by animateColorAsState(if (favorite) LikeRed else Color.White, tween(200), label = "heart")
@@ -430,7 +445,7 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
             GlassChip(onClick = onLyrics, cell(), horizontalPadding = 8.dp, active = lyricsOn) {
                 Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(16.dp)); Text("Текст", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
-            GlassChip(onClick = { player.startRadio(seed = track.id) }, cell(), horizontalPadding = 8.dp) {
+            GlassChip(onClick = { Haptics.press(context, App.settings); player.startRadio(seed = track.id) }, cell(), horizontalPadding = 8.dp) {
                 Icon(Icons.Filled.Radio, null, Modifier.size(16.dp)); Text("Радио", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
         }
@@ -473,4 +488,49 @@ private fun QueueRow(item: QueueItem, onClick: () -> Unit) {
         }
         Text(formatTime(item.duration), color = Color.White.copy(alpha = 0.7f), style = MaterialTheme.typography.labelMedium)
     }
+}
+
+private val infoCache = HashMap<Int, String>()
+
+/** Genre and file quality from the track's passport, in quiet text; empty while loading or offline. */
+@Composable
+private fun TrackInfoLine(trackId: Int) {
+    var text by remember(trackId) { mutableStateOf(infoCache[trackId] ?: "") }
+    LaunchedEffect(trackId) {
+        if (infoCache.containsKey(trackId)) return@LaunchedEffect
+        val passport = runCatching { App.api.trackDetail(trackId).passport }.getOrNull() ?: return@LaunchedEffect
+        val line = describePassport(passport)
+        infoCache[trackId] = line
+        text = line
+    }
+    // a blank line keeps the layout from jumping while the text loads
+    Text(
+        text.ifEmpty { " " }, color = Color.White.copy(alpha = 0.45f), style = MaterialTheme.typography.bodySmall,
+        maxLines = 1, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center,
+    )
+}
+
+private fun describePassport(p: Passport): String {
+    val parts = ArrayList<String>()
+    val genres = (p.genres ?: emptyList()).filter { it.isNotBlank() }.take(2)
+    if (genres.isNotEmpty()) parts.add(genres.joinToString(", "))
+    val format = p.format?.takeIf { it.isNotBlank() }
+    if (format != null) {
+        val lossless = format.uppercase() in setOf("FLAC", "WAV", "ALAC", "AIFF", "APE", "WV")
+        val rate = p.sampleRate
+        val bitrate = p.bitrate
+        parts.add(
+            when {
+                lossless && rate != null && rate > 0 -> "$format · " + khz(rate)
+                !lossless && bitrate != null && bitrate > 0 -> "$format · ${(bitrate / 1000.0).roundToInt()} кбит/с"
+                else -> format
+            },
+        )
+    }
+    return parts.joinToString(" · ")
+}
+
+private fun khz(hz: Int): String {
+    val k = hz / 1000.0
+    return if (k % 1.0 == 0.0) "${k.toInt()} кГц" else String.format(java.util.Locale.US, "%.1f", k).replace('.', ',') + " кГц"
 }

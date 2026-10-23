@@ -1,5 +1,6 @@
 package app.musik.android.ui.screens
 
+import app.musik.android.data.Haptics
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -88,8 +89,12 @@ fun MainScreen(state: AppState) {
     var showPlayer by rememberSaveable { mutableStateOf(false) }
     val navigator = remember(nav) { Navigator(nav) { showPlayer = false } }
     val player = App.player
+    val context = androidx.compose.ui.platform.LocalContext.current
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
+    // the tab the user is in, also while a page of it (artist, album, search) is open
+    var activeTab by rememberSaveable { mutableStateOf(Routes.HOME) }
+    LaunchedEffect(route) { if (tabs.any { it.route == route }) activeTab = route!! }
 
     LaunchedEffect(Unit) {
         snapshotFlow { DeepLinks.pending }.filterNotNull().collect { link ->
@@ -124,8 +129,11 @@ fun MainScreen(state: AppState) {
                         NavigationBar(containerColor = MusikColors.surface.copy(alpha = 0.97f), tonalElevation = 0.dp) {
                             tabs.forEach { tab ->
                                 NavigationBarItem(
-                                    selected = route == tab.route,
-                                    onClick = { navigator.tab(tab.route) },
+                                    selected = activeTab == tab.route,
+                                    onClick = {
+                                        if (activeTab == tab.route) navigator.reselect(tab.route, route == tab.route)
+                                        else navigator.tab(tab.route)
+                                    },
                                     icon = { Icon(tab.icon, null) },
                                     label = { Text(tab.title, maxLines = 1) },
                                     colors = NavigationBarItemDefaults.colors(
@@ -146,6 +154,7 @@ fun MainScreen(state: AppState) {
                     composable(Routes.LIBRARY) { LibraryScreen() }
                     composable(Routes.DOWNLOADS) { DownloadsScreen() }
                     composable(Routes.PROFILE) { ProfileScreen() }
+                    composable(Routes.SEARCH) { SearchScreen() }
                     composable(Routes.ARTIST, arguments = listOf(navArgument("name") { type = NavType.StringType })) { e ->
                         ArtistScreen(e.arguments?.getString("name") ?: "")
                     }
@@ -177,6 +186,7 @@ fun MainScreen(state: AppState) {
 private fun MiniPlayer(onOpen: () -> Unit) {
     val player = App.player
     val track = player.current ?: return
+    val context = androidx.compose.ui.platform.LocalContext.current
     Column(
         Modifier
             .fillMaxWidth()
@@ -198,14 +208,14 @@ private fun MiniPlayer(onOpen: () -> Unit) {
                     color = MusikColors.muted, style = MaterialTheme.typography.bodySmall,
                 )
             }
-            IconButton(onClick = { player.togglePlay() }) {
+            IconButton(onClick = { Haptics.press(context, App.settings); player.togglePlay() }) {
                 if (player.isBuffering || player.busy) {
                     CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Color.White)
                 } else {
                     Icon(if (player.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow, "Играть/пауза")
                 }
             }
-            IconButton(onClick = { player.skip() }, enabled = !player.busy) {
+            IconButton(onClick = { Haptics.press(context, App.settings); player.skip() }, enabled = !player.busy) {
                 Icon(Icons.Filled.SkipNext, "Дальше")
             }
         }

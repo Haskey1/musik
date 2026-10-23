@@ -1,5 +1,7 @@
 package app.musik.android.ui.screens
 
+import app.musik.android.ui.Routes
+import app.musik.android.ui.ScrollToTopOnReselect
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,7 +59,9 @@ fun DownloadsScreen() {
     fun play(index: Int, shuffle: Boolean) = player.playOffline(items.map { it.track }, index, shuffle)
 
     Box(Modifier.fillMaxSize()) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    ScrollToTopOnReselect(Routes.DOWNLOADS) { listState.animateScrollToItem(0) }
+    LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         item {
             Column(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Сохранённые", style = displayStyle(32))

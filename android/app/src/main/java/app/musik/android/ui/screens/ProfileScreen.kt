@@ -1,5 +1,7 @@
 package app.musik.android.ui.screens
 
+import app.musik.android.ui.Routes
+import app.musik.android.ui.ScrollToTopOnReselect
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.background
@@ -112,8 +114,10 @@ fun ProfileScreen() {
     }
 
     Box(Modifier.fillMaxSize()) {
+    val scroll = rememberScrollState()
+    ScrollToTopOnReselect(Routes.PROFILE) { scroll.animateScrollTo(0) }
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).statusBarsPadding().padding(16.dp),
+        Modifier.fillMaxSize().verticalScroll(scroll).statusBarsPadding().padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         Text("Профиль", style = displayStyle(32))

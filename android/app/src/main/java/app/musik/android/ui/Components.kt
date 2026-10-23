@@ -1,5 +1,6 @@
 package app.musik.android.ui
 
+import app.musik.android.data.Haptics
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -217,10 +218,13 @@ fun TrackRow(
     index: Int? = null,
     showArtwork: Boolean = true,
     onDark: Boolean = false,
+    /** Favourites list: the heart is a button that takes the like back. */
+    unlikable: Boolean = false,
     onClick: () -> Unit,
 ) {
     val player = App.player
     val offline = App.offline
+    val context = androidx.compose.ui.platform.LocalContext.current
     val isCurrent = player.current?.id == track.id
     var menu by remember { mutableStateOf(false) }
     val sub = if (onDark) Color.White.copy(alpha = 0.7f) else MusikColors.muted
@@ -255,7 +259,18 @@ fun TrackRow(
                 offline.isSaved(track.id) -> Icon(Icons.Filled.CheckCircle, "Сохранён", Modifier.size(15.dp), tint = if (onDark) Color.White else MusikColors.teal)
             }
             if (track.id in App.state.favoriteTracks) {
-                Icon(Icons.Filled.Favorite, null, Modifier.size(14.dp), tint = if (onDark) Color.White else MusikColors.accent)
+                val tint = if (onDark) Color.White else MusikColors.accent
+                if (unlikable) {
+                    IconButton(
+                        onClick = {
+                            Haptics.tick(context, App.settings)
+                            App.state.perform { App.state.toggleFavoriteTrack(track) }
+                        },
+                        Modifier.size(40.dp),
+                    ) { Icon(Icons.Filled.Favorite, "Убрать из любимых", Modifier.size(20.dp), tint = tint) }
+                } else {
+                    Icon(Icons.Filled.Favorite, null, Modifier.size(14.dp), tint = tint)
+                }
             }
             Text(formatTime(track.duration), color = sub, style = MaterialTheme.typography.labelMedium)
         }

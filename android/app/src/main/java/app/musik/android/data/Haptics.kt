@@ -15,6 +15,12 @@ object Haptics {
         runCatching { vibrator(context)?.vibrate(effect) }
     }
 
+    /** A crisp press: play, pause, skip, radio. */
+    fun press(context: Context, settings: Settings) {
+        if (!settings.haptics) return
+        runCatching { vibrator(context)?.vibrate(VibrationEffect.createOneShot(16, 140)) }
+    }
+
     /** One light tap: unlike, dislike, undislike. */
     fun tick(context: Context, settings: Settings) {
         if (!settings.haptics) return
