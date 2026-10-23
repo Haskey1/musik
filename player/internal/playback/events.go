@@ -3,6 +3,7 @@ package playback
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"time"
 
 	"github.com/torwin-job/musik/player/internal/db"
@@ -221,6 +222,10 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 		e.ObserveExploreOutcome(source, outcome, true)
 		e.ExcludeTrack(sess, ev.TrackID)
+		if outcome == "early_skip" || mood {
+			log.Printf("radio skip: track=%d outcome=%s mood=%t cluster=%d streak=%d mode=%s shifts_radio=%t",
+				ev.TrackID, outcome, mood, cluster, sess.TasteState.SkipStreak, sess.Mode, shiftsRadio(sess))
+		}
 		if shiftsRadio(sess) && (mood || (outcome == "early_skip" && sess.TasteState.ShiftsAway(cluster))) {
 			// the queue was built for the mood the listener has just rejected: rebuild
 			// it without the track they are leaving as the point of reference
