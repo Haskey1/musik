@@ -26,7 +26,7 @@ func moodLibrary(t *testing.T) *index.Index {
 			Embedding: index.Float32Bytes(vec), Dim: 3, Plays: 1,
 		})
 	}
-	for i := 0; i < 150; i++ { // one track each of many electronic artists
+	for i := 0; i < 600; i++ { // one track each of many electronic artists, more than the candidate pool
 		add(fmt.Sprintf("DJ %d", i), 0, []float32{1, float32(i%7) * 0.02, float32(i%5) * 0.03})
 	}
 	for a := 0; a < 8; a++ { // rock: eight artists, three tracks each

@@ -78,11 +78,24 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 		currentMeta = &meta
 	}
 
-	cands := CollectCandidates(b.Idx, opts.CurrentID, CandidateOpts{
-		Taste: opts.Taste, Current: currentVec, Session: opts.Session, Daypart: opts.Daypart,
-		Mood: mood, Place: place, Activity: activity, Centroids: opts.Centroids,
-		Exclude: opts.Exclude, Rules: opts.Rules, Now: opts.Now, Pool: 200,
-	})
+	collect := func(reject func(index.Meta) bool) []Candidate {
+		return CollectCandidates(b.Idx, opts.CurrentID, CandidateOpts{
+			Taste: opts.Taste, Current: currentVec, Session: opts.Session, Daypart: opts.Daypart,
+			Mood: mood, Place: place, Activity: activity, Centroids: opts.Centroids,
+			Exclude: opts.Exclude, Rules: opts.Rules, Now: opts.Now, Pool: 200, Reject: reject,
+		})
+	}
+	var cands []Candidate
+	if opts.Shifted && opts.ClusterPenalty != nil {
+		// a cluster the listener has clearly left is not even considered, as long as
+		// enough other music remains
+		cands = collect(func(m index.Meta) bool {
+			return m.ClusterID >= 0 && opts.ClusterPenalty(m.ClusterID) >= 0.7
+		})
+	}
+	if len(cands) < opts.Size {
+		cands = collect(nil)
+	}
 
 	scored := make([]ScoredCandidate, 0, len(cands))
 	for _, cand := range cands {
@@ -115,21 +128,6 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 		scored = append(scored, ScoredCandidate{
 			Candidate: cand, Score: score, Features: values, Downrank: downrank,
 		})
-	}
-
-	if opts.Shifted && opts.ClusterPenalty != nil {
-		// a cluster the listener has clearly left is dropped, as long as enough other music remains
-		kept := make([]ScoredCandidate, 0, len(scored))
-		for _, c := range scored {
-			meta := b.Idx.MetaAt(c.Row)
-			if meta.ClusterID >= 0 && opts.ClusterPenalty(meta.ClusterID) >= 0.7 {
-				continue
-			}
-			kept = append(kept, c)
-		}
-		if len(kept) >= opts.Size {
-			scored = kept
-		}
 	}
 
 	quotas := coreQuotas(opts)
