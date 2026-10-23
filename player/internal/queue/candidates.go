@@ -58,6 +58,9 @@ type CandidateOpts struct {
 	Rules     *rules.Evaluator
 	Now       time.Time
 	Pool      int
+	// Reject drops a track before the pool is filled, so rejected music cannot crowd
+	// out everything else when it dominates the library.
+	Reject func(index.Meta) bool
 }
 
 func CollectCandidates(idx *index.Index, currentID int64, opts CandidateOpts) []Candidate {
@@ -133,8 +136,14 @@ func CollectCandidates(idx *index.Index, currentID int64, opts CandidateOpts) []
 		md5Cur = idx.MetaAt(r).FileMD5
 	}
 	out := make([]Candidate, 0, pool)
-	for _, item := range best[:pool] {
+	for _, item := range best {
+		if len(out) >= pool {
+			break
+		}
 		meta := idx.MetaAt(item.row)
+		if opts.Reject != nil && opts.Reject(meta) {
+			continue
+		}
 		if meta.ID == currentID || opts.Exclude[meta.ID] {
 			continue
 		}
