@@ -1,6 +1,7 @@
 package app.musik.android.ui.screens
 
 import androidx.compose.foundation.basicMarquee
+import androidx.compose.material3.IconButton
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.filled.Search
 import app.musik.android.data.Haptics
