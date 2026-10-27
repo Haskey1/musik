@@ -308,7 +308,7 @@ final class PlayerController: ObservableObject {
                 let res = try await self.postEvent("skip", track: track, reason: reason,
                                                    retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
-                self.advance(with: res)
+                self.advance(with: res, after: track)
             } catch {
                 guard req == self.requestSeq else { return }
                 if Self.isNetwork(error) {
@@ -368,7 +368,7 @@ final class PlayerController: ObservableObject {
                 let res = try await self.postEvent("track_end", track: track, reason: "completed",
                                                    retry: true, timeout: Self.eventTimeout)
                 guard req == self.requestSeq, let res else { return }
-                self.advance(with: res)
+                self.advance(with: res, after: track)
             } catch {
                 guard req == self.requestSeq else { return }
                 // No server to ask for the next track: carry on from the phone.
@@ -409,9 +409,15 @@ final class PlayerController: ObservableObject {
         return true
     }
 
-    private func advance(with res: EventResult) {
+    private func advance(with res: EventResult, after ended: Track) {
         applyLists(res)
-        if let next = res.next {
+        if var next = res.next {
+            // The server's view of the queue can lag behind the phone (it played its own
+            // copy ahead of the answer): never start the track that has just ended again.
+            if !fixed, next.id == ended.id,
+               let other = queue.map(\.asTrack).first(where: { $0.id != ended.id }) {
+                next = other
+            }
             load(next, autoplay: true)
         } else if res.ended == true {
             player.pause()
@@ -427,7 +433,8 @@ final class PlayerController: ObservableObject {
             fixed = true
             playlist = tracks
         } else if let q = res.queue {
-            queue = q
+            // the track that is playing is not "up next", whatever the server thinks
+            queue = q.filter { $0.trackId != current?.id }
         }
         schedulePrefetch()
     }

@@ -93,6 +93,9 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 		sess.Current = ev.TrackID
 		e.ExcludeTrack(sess, ev.TrackID)
+		if len(sess.DailyIDs) == 0 {
+			e.dropFromQueue(sess, ev.TrackID)
+		}
 		if lifecycle.LifecycleChanged {
 			e.Idx.BumpShownLocal(ev.TrackID)
 			_ = e.Store.BumpRecStats(ev.TrackID, 1, 0, 0)
@@ -222,6 +225,9 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 		e.ObserveExploreOutcome(source, outcome, true)
 		e.ExcludeTrack(sess, ev.TrackID)
+		if len(sess.DailyIDs) == 0 {
+			e.dropFromQueue(sess, ev.TrackID)
+		}
 		if outcome == "early_skip" || mood {
 			log.Printf("radio skip: track=%d outcome=%s mood=%t cluster=%d streak=%d mode=%s shifts_radio=%t",
 				ev.TrackID, outcome, mood, cluster, sess.TasteState.SkipStreak, sess.Mode, shiftsRadio(sess))
