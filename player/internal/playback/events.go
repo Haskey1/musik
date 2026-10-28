@@ -92,6 +92,9 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 		sess.Current = ev.TrackID
 		e.ExcludeTrack(sess, ev.TrackID)
+		if len(sess.DailyIDs) == 0 {
+			e.dropFromQueue(sess, ev.TrackID)
+		}
 		if lifecycle.LifecycleChanged {
 			e.Idx.BumpShownLocal(ev.TrackID)
 			_ = e.Store.BumpRecStats(ev.TrackID, 1, 0, 0)
@@ -216,6 +219,9 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 		e.ObserveExploreOutcome(source, outcome, true)
 		e.ExcludeTrack(sess, ev.TrackID)
+		if len(sess.DailyIDs) == 0 {
+			e.dropFromQueue(sess, ev.TrackID)
+		}
 		nextID := e.Advance(sess)
 		return EventResult{
 			OK: true, IsEnd: true, SignedWeight: signed,

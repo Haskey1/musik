@@ -25,6 +25,30 @@ func (e *Engine) ExcludeTrack(sess *Session, trackID int64) {
 	}
 }
 
+// dropFromQueue removes a track (and its clones) from the upcoming radio queue: once it
+// has started or ended it must not come back as "next". The phone may play a different
+// track than the server's queue[0] (it plays its own prefetched copy of the queue ahead
+// of the server's answer), so the queue can still hold the track the phone is on.
+func (e *Engine) dropFromQueue(sess *Session, trackID int64) {
+	if sess == nil || trackID == 0 || len(sess.Queue) == 0 {
+		return
+	}
+	drop := map[int64]bool{}
+	for _, id := range e.Idx.CloneIDs(trackID) {
+		drop[id] = true
+	}
+	drop[trackID] = true
+	kept := sess.Queue[:0:0]
+	for _, item := range sess.Queue {
+		if !drop[item.TrackID] {
+			kept = append(kept, item)
+		}
+	}
+	if len(kept) != len(sess.Queue) {
+		sess.Queue = kept
+	}
+}
+
 func (e *Engine) SeedRadioExclude(sess *Session) {
 	ids, err := e.Store.RecentTrackIDs(48, 120)
 	if err != nil {
@@ -458,6 +482,8 @@ func (e *Engine) Advance(sess *Session) int64 {
 		sess.DailyIDs = nil
 		sess.Mode = "radio"
 	}
+	// never hand out the track that is playing now as the next one
+	e.dropFromQueue(sess, sess.Current)
 	if len(sess.Queue) > 0 {
 		sess.CurrentItem = sess.Queue[0]
 		nextID = sess.CurrentItem.TrackID
