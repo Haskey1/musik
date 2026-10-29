@@ -22,33 +22,43 @@ struct NowPlayingView: View {
         ZStack {
             CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
+                GeometryReader { geo in
                 ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 22) {
-                        topBar
-                        ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 22)
-                            .frame(maxWidth: 340)
-                            .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
-                            .scaleEffect(player.isPlaying ? 1 : 0.94)
-                            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: player.isPlaying)
-                            .swipeToSkip(threshold: 90) { swiping = $0 }
-                            .padding(.horizontal, 24)
-                        titleBlock(track)
-                        SeekBar()
-                        transport
-                        actions(track) {
-                            // «Текст» swaps the queue below for the lyrics and scrolls to them
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                pane = pane == .lyrics ? .queue : .lyrics
-                            }
-                            if pane == .lyrics {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                    withAnimation(.easeInOut(duration: 0.35)) {
-                                        scroller.scrollTo("pane", anchor: .top)
+                        // The player proper is exactly one screen tall, and the cover takes
+                        // whatever the controls leave: on a smaller phone the cover is smaller,
+                        // but both rows of buttons are always in view. The queue / lyrics
+                        // start below the fold.
+                        VStack(spacing: 22) {
+                            topBar
+                            ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 22)
+                                .frame(maxWidth: 340, minHeight: Self.minCover, maxHeight: .infinity)
+                                .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
+                                // shrinks only while the listener has paused; the short pause
+                                // between tracks (waiting for the server) must not make it breathe
+                                .scaleEffect(coverActive ? 1 : 0.94)
+                                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: coverActive)
+                                .swipeToSkip(threshold: 90) { swiping = $0 }
+                                .padding(.horizontal, 24)
+                            titleBlock(track)
+                            SeekBar()
+                            transport
+                            actions(track) {
+                                // «Текст» swaps the queue below for the lyrics and scrolls to them
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    pane = pane == .lyrics ? .queue : .lyrics
+                                }
+                                if pane == .lyrics {
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                                        withAnimation(.easeInOut(duration: 0.35)) {
+                                            scroller.scrollTo("pane", anchor: .top)
+                                        }
                                     }
                                 }
                             }
                         }
+                        .frame(height: max(geo.size.height - 8, Self.minPlayerHeight))
                         Group {
                             switch pane {
                             case .queue: upNext
@@ -75,6 +85,7 @@ struct NowPlayingView: View {
                 }
                 .scrollDisabled(swiping)
                 }
+                }
             } else {
                 VStack(spacing: 12) {
                     Text("Ничего не играет").font(.title3.weight(.semibold))
@@ -91,6 +102,14 @@ struct NowPlayingView: View {
         .sheet(isPresented: $showEqualizer) { EqualizerView() }
         .interactiveDismissDisabled(swiping)
     }
+
+    /// The cover never gets smaller than this, nor the player section shorter than
+    /// `minPlayerHeight`: on a very small screen the page scrolls a little instead.
+    private static let minCover: CGFloat = 150
+    private static let minPlayerHeight: CGFloat = 640
+
+    /// Full size while playing, loading or waiting for the next track; smaller only when paused.
+    private var coverActive: Bool { player.isPlaying || player.isBuffering || player.busy }
 
     // MARK: Parts
 
@@ -166,10 +185,17 @@ struct NowPlayingView: View {
 
     private func titleBlock(_ track: Track) -> some View {
         VStack(spacing: 6) {
-            Text(track.displayTitle)
+            // always two lines tall: a one-line title must not change the cover's size
+            Text("M\nM")
                 .font(.title2.weight(.bold))
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
+                .hidden()
+                .overlay {
+                    Text(track.displayTitle)
+                        .font(.title2.weight(.bold))
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.85)
+                }
             // artist and album open their pages
             HStack(spacing: 6) {
                 if let artist = track.artist.nonEmpty {
@@ -191,14 +217,14 @@ struct NowPlayingView: View {
             .foregroundStyle(Color.white.opacity(0.7))
             .lineLimit(1)
             .padding(.horizontal, 8)
+            .frame(minHeight: 20)
             TrackInfoLine(trackId: track.id)
-            if let source = Labels.source(track.source) {
-                Text(source)
-                    .font(.caption2.weight(.semibold))
-                    .padding(.horizontal, 8).padding(.vertical, 3)
-                    .background(Color.white.opacity(0.15), in: Capsule())
-                    .foregroundStyle(Color.white.opacity(0.8))
-            }
+            // the badge's place is kept when there is none
+            Text(Labels.source(track.source) ?? " ")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Color.white.opacity(Labels.source(track.source) == nil ? 0 : 0.15), in: Capsule())
+                .foregroundStyle(Color.white.opacity(0.8))
         }
         .padding(.horizontal, 24)
     }
