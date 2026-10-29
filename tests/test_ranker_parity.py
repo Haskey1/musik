@@ -335,6 +335,7 @@ def test_wildcard_arm_skips_negative_neighbors() -> None:
         size=10,
         pool=1,
         negative=lambda vec: 1.0 if float(vec[1]) < 0 else 0.0,
+        artist_limit=None,  # the fixture is five tracks of one artist: this tests the arm
     )
     found = {item["track_id"] for item in ranked}
     assert 4 in found
