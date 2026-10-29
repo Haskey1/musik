@@ -181,6 +181,7 @@ def generate_radio(
             size=1,
             explore_ratio=explore_ratio,
             pool=80,
+            artist_limit=None,
         )
         if not nxt:
             break

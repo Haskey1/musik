@@ -363,7 +363,9 @@ def generate_mix_pack(
             for entry in build.entries[: max(1, reserve_prefix)]
         )
 
-    fy = generate_for_you(size=for_you_size)
+    # blocked artists / tracks are in `reserved` from the start: the artist cap makes the
+    # ranker reach further down the list, so nothing may rely on them being far away
+    fy = generate_for_you(size=for_you_size, forbidden_track_ids=reserved)
     results["for_you"] = {"id": fy.persist(), "name": fy.name, "n": len(fy.entries)}
     reserve(fy)
 
