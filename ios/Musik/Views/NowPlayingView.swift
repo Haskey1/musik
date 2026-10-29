@@ -189,6 +189,7 @@ struct NowPlayingView: View {
             Text("M\nM")
                 .font(.title2.weight(.bold))
                 .hidden()
+                .frame(maxWidth: .infinity)  // the real title gets the full width, not one letter's
                 .overlay {
                     Text(track.displayTitle)
                         .font(.title2.weight(.bold))
@@ -301,12 +302,12 @@ struct NowPlayingView: View {
             }
             HStack(spacing: 10) {
                 Button { player.playSimilarNow() } label: {
-                    Label("Похожее", systemImage: "sparkles").frame(maxWidth: .infinity)
+                    Label("Похожее", systemImage: "sparkles").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle())
 
                 Button(action: onLyrics) {
-                    Label("Текст", systemImage: "quote.bubble").frame(maxWidth: .infinity)
+                    Label("Текст", systemImage: "quote.bubble").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle(active: pane == .lyrics))
 
@@ -314,7 +315,7 @@ struct NowPlayingView: View {
                     Haptics.press()
                     player.startRadio(seed: track.id)
                 } label: {
-                    Label("Радио", systemImage: "dot.radiowaves.left.and.right").frame(maxWidth: .infinity)
+                    Label("Радио", systemImage: "dot.radiowaves.left.and.right").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
                 }
                 .buttonStyle(GlassChipStyle())
             }
