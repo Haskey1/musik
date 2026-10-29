@@ -5,8 +5,8 @@ extension APIClient {
     // Auth & status
     func health() async throws -> Health { try await get("/api/health") }
 
-    func authMe() async throws -> AuthMe {
-        try decode(AuthMe.self, from: try await send("GET", "/api/auth/me", redirectOn401: false))
+    func authMe(timeout: TimeInterval? = nil) async throws -> AuthMe {
+        try decode(AuthMe.self, from: try await send("GET", "/api/auth/me", redirectOn401: false, timeout: timeout))
     }
 
     func login(password: String) async throws {

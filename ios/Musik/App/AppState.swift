@@ -99,8 +99,11 @@ final class AppState: ObservableObject {
             return
         }
         do {
-            let me = try await api.authMe()
+            // A short wait: with no signal the answer will not come, and the launch
+            // screen must not hang for the full request timeout.
+            let me = try await api.authMe(timeout: 6)
             if me.ok || me.authEnabled == false {
+                settings.signedInBefore = true
                 phase = .ready
                 await refreshFavorites()
                 Task { await refreshArtistPhotos(force: true) }
@@ -108,12 +111,14 @@ final class AppState: ObservableObject {
             } else {
                 phase = .login
             }
-        } catch let e as APIError where e.status == 0 && settings.token.nonEmpty != nil {
-            // No connection, but we were signed in before: open the app with what is
-            // saved on the phone instead of the login screen.
+        } catch let e as APIError where Self.serverUnreachable(e) && wasSignedIn {
+            // No connection (or the server / tunnel is down), but we were signed in
+            // before: open the app with what is saved on the phone instead of the login
+            // screen, and keep trying to reach the server in the background.
             offlineLaunch = true
             phase = .ready
             show("Нет связи с сервером — играют сохранённые треки")
+            startReconnectLoop()
         } catch {
             // Server unreachable: still show the login screen with the saved URL.
             phase = .login
@@ -121,9 +126,38 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// The request never got an answer (no network, timeout, bad gateway from the tunnel).
+    /// Not a 401: a rejected token still goes to the login screen.
+    private static func serverUnreachable(_ e: APIError) -> Bool {
+        e.status == 0 || e.status >= 500
+    }
+
+    /// This install has been signed in before: a token, a remembered sign-in, or a cookie.
+    private var wasSignedIn: Bool {
+        if settings.token.nonEmpty != nil || settings.signedInBefore { return true }
+        if let url = URL(string: settings.baseURL),
+           !(HTTPCookieStorage.shared.cookies(for: url) ?? []).isEmpty { return true }
+        return false
+    }
+
+    private var reconnectTask: Task<Void, Never>?
+
+    /// After an offline launch: checks every 15 s whether the server answers again.
+    private func startReconnectLoop() {
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            while let self, !Task.isCancelled, self.offlineLaunch {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self.reconnect()
+            }
+        }
+    }
+
     /// Called when the connection comes back after an offline launch.
     func reconnect() async {
-        guard offlineLaunch, let me = try? await api.authMe(), me.ok || me.authEnabled == false else { return }
+        guard offlineLaunch, let me = try? await api.authMe(timeout: 6), me.ok || me.authEnabled == false else { return }
+        settings.signedInBefore = true
         offlineLaunch = false
         homeRevision += 1
         await refreshFavorites()
@@ -168,6 +202,7 @@ final class AppState: ObservableObject {
             throw APIError(status: 401, code: "auth_required",
                            message: mode == .token ? "Сервер не принял токен" : "Неверное имя или пароль")
         }
+        settings.signedInBefore = true
         phase = .ready
         await refreshFavorites()
         await refreshArtistPhotos(force: true)
@@ -177,6 +212,8 @@ final class AppState: ObservableObject {
         player.stop(clearSession: true)
         await api.logout()
         settings.token = nil
+        settings.signedInBefore = false
+        reconnectTask?.cancel()
         HTTPCookieStorage.shared.cookies?.forEach { HTTPCookieStorage.shared.deleteCookie($0) }
         ImageLoader.shared.clear()
         ArtistPhotos.shared.clear()

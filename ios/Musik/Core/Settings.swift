@@ -25,6 +25,14 @@ final class Settings: @unchecked Sendable {
         set { Keychain.set("apiToken", newValue) }
     }
 
+    /// Set once the server accepted this install; lets a later launch without a connection
+    /// open the saved tracks instead of the login screen (also for cookie sessions, which
+    /// have no token to check).
+    var signedInBefore: Bool {
+        get { defaults.bool(forKey: "signedInBefore") }
+        set { defaults.set(newValue, forKey: "signedInBefore") }
+    }
+
     /// Last playback session, used to resume after the app was killed.
     var sessionId: String? {
         get { defaults.string(forKey: "sessionId") }

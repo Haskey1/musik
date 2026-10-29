@@ -6,8 +6,6 @@ struct DownloadsView: View {
     @EnvironmentObject var player: PlayerController
     @EnvironmentObject var offline: OfflineStore
 
-    @State private var confirmClear = false
-
     var body: some View {
         let items = offline.savedTracks
         List {
@@ -36,7 +34,7 @@ struct DownloadsView: View {
                     .listRowBackground(Color.clear)
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { i, s in
-                        TrackRow(track: s.track) { play(items, at: i, shuffle: false) }
+                        TrackRow(track: s.track, unlikable: true) { play(items, at: i, shuffle: false) }
                             .swipeActions {
                                 Button(role: .destructive) { offline.remove(s.id) } label: {
                                     Label("Удалить", systemImage: "trash")
@@ -60,27 +58,12 @@ struct DownloadsView: View {
                 }
             }
 
-            Section {
-                Toggle("Сохранять лайкнутые", isOn: $offline.autoSaveFavorites)
-                    .onChange(of: offline.autoSaveFavorites) { on in
-                        if on { Task { await app.refreshFavorites() } }
-                    }
-                if !items.isEmpty {
-                    Button("Удалить все сохранённые", role: .destructive) { confirmClear = true }
-                }
-            } footer: {
-                Text("Без интернета радио само переключается на сохранённые треки, а когда связь вернётся — обратно на онлайн-радио. Следующие пару треков приложение подгружает заранее.")
-            }
         }
         .listStyle(.plain)
         .resetScrollOnReselect(tab: 2)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
         .navigationTitle("Сохранённые")
-        .confirmationDialog("Удалить все сохранённые треки с телефона?", isPresented: $confirmClear,
-                            titleVisibility: .visible) {
-            Button("Удалить", role: .destructive) { offline.removeAll() }
-        }
     }
 
     private func play(_ items: [SavedTrack], at index: Int, shuffle: Bool) {

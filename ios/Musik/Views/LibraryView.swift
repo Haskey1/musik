@@ -51,6 +51,7 @@ struct LibraryView: View {
         .refreshable { await load() }
         .task { if !loaded { await load() } }
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
+        .onChange(of: app.offlineLaunch) { offline in if !offline { Task { await load() } } }
     }
 
     // MARK: Sections

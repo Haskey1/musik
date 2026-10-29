@@ -34,6 +34,8 @@ struct HomeView: View {
         }
         .task { if !loaded { await load() } }
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
+        // the app was opened without a connection: fill the screen once the server is back
+        .onChange(of: app.offlineLaunch) { offline in if !offline { Task { await load() } } }
         .navigationBarHidden(true)
         // No navigation bar here, so give the status bar its own backdrop:
         // otherwise shelf titles scroll right under the clock.
@@ -68,20 +70,6 @@ struct HomeView: View {
                 .padding(.top, 4)
             }
             RadioCard()
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    Button {
-                        Task { await refreshMixes() }
-                    } label: {
-                        HStack(spacing: 6) {
-                            if refreshingMixes { ProgressView().controlSize(.small) }
-                            Text(refreshingMixes ? "Собираю…" : "Обновить миксы")
-                        }
-                    }
-                    .buttonStyle(ChipButtonStyle())
-                    .disabled(refreshingMixes)
-                }
-            }
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -103,15 +91,44 @@ struct HomeView: View {
         let main = mixes.filter { !$0.isWeekday }
         let week = mixes.filter(\.isWeekday)
         if !main.isEmpty {
-            Shelf(title: "Для тебя") {
+            Shelf(title: "Миксы", subtitle: "Для тебя", trailing: AnyView(refreshMixesButton)) {
                 ForEach(main) { mix in MixCard(mix: mix) { playMix(mix) } }
             }
         }
         if !week.isEmpty {
-            Shelf(title: "Дни недели") {
+            Shelf(title: "Дни недели", trailing: main.isEmpty ? AnyView(refreshMixesButton) : nil) {
                 ForEach(week) { mix in MixCard(mix: mix) { playMix(mix) } }
             }
         }
+        if loaded && main.isEmpty && week.isEmpty && !app.offlineLaunch {
+            Shelf(title: "Миксы", subtitle: "Ещё не собраны", trailing: AnyView(refreshMixesButton)) {
+                EmptyView()
+            }
+        }
+    }
+
+    /// Rebuilds the mixes only (the radio is not touched), so it sits with them.
+    private var refreshMixesButton: some View {
+        Button {
+            Task { await refreshMixes() }
+        } label: {
+            HStack(spacing: 6) {
+                if refreshingMixes {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
+                Text(refreshingMixes ? "Собираю…" : "Обновить")
+            }
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Theme.surfaceHigh, in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.08)))
+        }
+        .buttonStyle(.plain)
+        .disabled(refreshingMixes)
+        .accessibilityLabel("Обновить миксы")
     }
 
     @ViewBuilder
@@ -184,7 +201,7 @@ struct HomeView: View {
 
     private func playMix(_ mix: Mix) {
         guard mix.ready != false else {
-            app.show(mix.kind == "later" || mix.kind == "favorites" ? mix.metaLabel : "Микс не собран — нажми «Обновить миксы»")
+            app.show(mix.kind == "later" || mix.kind == "favorites" ? mix.metaLabel : "Микс не собран — нажми «Обновить» у миксов")
             return
         }
         player.playMix(mix.kind)

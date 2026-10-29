@@ -81,7 +81,10 @@ struct MainView: View {
                 withAnimation { paths[i] = NavigationPath() }
             }
         }
-        .onAppear { openPendingLink() }
+        .onAppear {
+            if app.offlineLaunch { selection = 2 }
+            openPendingLink()
+        }
         .onChange(of: app.pendingLink) { _ in openPendingLink() }
         .onChange(of: app.pendingRoute) { route in
             guard let route else { return }

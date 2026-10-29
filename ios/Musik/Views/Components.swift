@@ -7,6 +7,7 @@ enum Route: Hashable {
     case artist(String)
     case album(artist: String?, album: String)
     case search
+    case profile(ProfileSection)
 }
 
 extension View {
@@ -16,6 +17,7 @@ extension View {
             case .artist(let name): ArtistDetailView(artist: name).miniPlayerSpace()
             case .album(let artist, let album): AlbumDetailView(artist: artist, album: album).miniPlayerSpace()
             case .search: SearchView().miniPlayerSpace()
+            case .profile(let section): ProfileSectionView(section: section).miniPlayerSpace()
             }
         }
     }
@@ -39,15 +41,21 @@ private struct MiniPlayerSpace: ViewModifier {
 struct Shelf<Content: View>: View {
     let title: String
     var subtitle: String?
+    /// A control at the right end of the title row (e.g. «Обновить» on the mixes).
+    var trailing: AnyView?
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.title3.weight(.bold))
-                if let subtitle {
-                    Text(subtitle).font(.footnote).foregroundStyle(Theme.muted)
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.title3.weight(.bold))
+                    if let subtitle {
+                        Text(subtitle).font(.footnote).foregroundStyle(Theme.muted)
+                    }
                 }
+                Spacer(minLength: 8)
+                if let trailing { trailing }
             }
             .padding(.horizontal, 16)
             ScrollView(.horizontal, showsIndicators: false) {
