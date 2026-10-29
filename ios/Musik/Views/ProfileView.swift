@@ -83,6 +83,7 @@ struct ProfileView: View {
     }
 
     private var serverHost: String? {
-        URL(string: app.settings.baseURL)?.host ?? app.settings.baseURL.nonEmpty
+        let base = app.settings.baseURL
+        return URL(string: base)?.host ?? (base.isEmpty ? nil : base)
     }
 }
