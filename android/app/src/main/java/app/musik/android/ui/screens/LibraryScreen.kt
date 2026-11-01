@@ -60,6 +60,7 @@ import app.musik.android.data.FavoritesResponse
 import app.musik.android.data.Track
 import app.musik.android.data.jsonBody
 import app.musik.android.data.nonEmpty
+import app.musik.android.data.SearchMatcher
 import app.musik.android.data.tracksWord
 import app.musik.android.ui.App
 import app.musik.android.ui.StatusBarScrim
@@ -151,8 +152,8 @@ fun LibraryScreen() {
     }
 
     val q = query.trim()
-    fun matches(s: String?) = q.isEmpty() || (s ?: "").contains(q, ignoreCase = true)
-    fun matchesTrack(t: Track) = matches(t.title) || matches(t.artist) || matches(t.album)
+    fun matches(s: String?) = SearchMatcher.matches(q, s)
+    fun matchesTrack(t: Track) = SearchMatcher.track(q, t)
 
     Box(Modifier.fillMaxSize()) {
     PullToRefreshBox(
@@ -371,8 +372,8 @@ fun SearchScreen() {
     LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
 
     val q = query.trim()
-    fun matches(s: String?) = q.isEmpty() || (s ?: "").contains(q, ignoreCase = true)
-    fun matchesTrack(t: Track) = matches(t.title) || matches(t.artist) || matches(t.album)
+    fun matches(s: String?) = SearchMatcher.matches(q, s)
+    fun matchesTrack(t: Track) = SearchMatcher.track(q, t)
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         item {
@@ -416,3 +417,4 @@ fun SearchScreen() {
         }
     }
 }
+
