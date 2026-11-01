@@ -639,6 +639,11 @@ final class PlayerController: ObservableObject {
 
     private func playbackFailed(gen: Int, error: Error?) {
         guard gen == generation, let track = current else { return }
+        if !offlineMode, networkUp, Self.isNetworkError(error), api.switchToFallback() {
+            app?.show("Основной сервер недоступен — переключаюсь на резервный")
+            load(track, autoplay: true, announce: false)
+            return
+        }
         if !offlineMode, !networkUp || Self.isNetworkError(error) {
             enterOfflineFallback()
             return
@@ -706,7 +711,7 @@ final class PlayerController: ObservableObject {
               let track = current, duration > 0 else { return }
         let fade = Double(settings.crossfadeSeconds)
         let left = duration - position
-        // a short track (or a short tail) is left alone; the fade is at most a quarter of it
+        // a short track (or a short tail) is left alone: the fade is at most a quarter of it
         guard duration >= fade * 4, left <= fade + 0.5, left > 1 else { return }
         guard let next = upcomingTracks(1).first else { return }
         if settings.crossfadeKeepAlbums, Self.sameAlbum(track, next) { return }
@@ -968,8 +973,7 @@ final class PlayerController: ObservableObject {
         probeTask?.cancel()
         probeTask = Task {
             while !Task.isCancelled && self.offlineFallback && !self.serverReachable {
-                let started = Date()
-                if self.networkUp, await self.api.ping(), Date().timeIntervalSince(started) < 2.5 {
+                if self.networkUp, await self.api.ping() {
                     guard !Task.isCancelled, self.offlineFallback else { return }
                     self.serverReachable = true
                     self.app?.show("Связь есть — после этого трека включу онлайн-радио")
@@ -1021,6 +1025,11 @@ final class PlayerController: ObservableObject {
             }
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             guard !Task.isCancelled, self.isBuffering, !self.offlineMode else { return }
+            if let track = self.current, self.api.switchToFallback() {
+                self.app?.show("Основной сервер не отвечает — переключаюсь на резервный")
+                self.load(track, autoplay: true, announce: false)
+                return
+            }
             self.enterOfflineFallback()
         }
     }
@@ -1076,7 +1085,7 @@ final class PlayerController: ObservableObject {
             return .success
         }
         c.togglePlayPauseCommand.addTarget { [weak self] _ in
-            self?.togglePlay()
+            self?.togglePlayPause()
             return .success
         }
         c.nextTrackCommand.addTarget { [weak self] _ in
