@@ -5,9 +5,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
-// The server address is not committed (the fork is public): CI passes the
-// MUSIK_SERVER_URL repository variable. Empty = the login screen asks for it.
+// Server addresses are not committed (the fork is public): CI passes repository
+// variables. Empty primary = the login screen asks for an address.
 val serverUrl: String = (System.getenv("MUSIK_SERVER_URL") ?: "").trim().trimEnd('/')
+val fallbackUrl: String = (System.getenv("MUSIK_FALLBACK_URL") ?: "").trim().trimEnd('/')
 
 // Every CI build gets a higher version code, so a new APK installs over the old one.
 val runNumber: Int = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
@@ -26,6 +27,7 @@ android {
         versionCode = runNumber
         versionName = "0.1.$runNumber"
         buildConfigField("String", "SERVER_URL", "\"" + serverUrl.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
+        buildConfigField("String", "FALLBACK_URL", "\"" + fallbackUrl.replace("\\", "\\\\").replace("\"", "\\\"") + "\"")
     }
 
     signingConfigs {
@@ -58,6 +60,9 @@ android {
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
@@ -93,4 +98,9 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("androidx.test:core:1.6.1")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
 }

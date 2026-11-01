@@ -51,6 +51,8 @@ class MusikApp : Application(), ImageLoaderFactory {
         }
         state.onFavoritesLoaded = { offline.syncFavorites(it) }
         state.onFavoriteChanged = { track, favorited -> offline.favoriteChanged(track, favorited) }
+        state.hasSavedTracks = { offline.saved.isNotEmpty() }
+        state.offlineFavoriteIds = { offline.saved.values.filter { it.auto }.map { it.id }.toSet() }
     }
 
     /** Covers and artist photos need the same auth as the API: Coil shares its OkHttp client. */
