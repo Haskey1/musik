@@ -57,6 +57,7 @@ jobs:
       - name: Build APK
         env:
           MUSIK_SERVER_URL: ${{ vars.MUSIK_SERVER_URL }}
+          MUSIK_FALLBACK_URL: ${{ vars.MUSIK_FALLBACK_URL }}
           MUSIK_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           MUSIK_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           MUSIK_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -65,8 +66,11 @@ jobs:
           if [ -z "$MUSIK_SERVER_URL" ]; then
             echo "::warning::Переменная репозитория MUSIK_SERVER_URL пуста — экран входа будет спрашивать адрес сервера."
           fi
+          if [ -z "$MUSIK_FALLBACK_URL" ]; then
+            echo "::warning::Переменная репозитория MUSIK_FALLBACK_URL пуста — fallback CDN отключён."
+          fi
           status=0
-          gradle assembleRelease --console=plain --no-daemon > build/gradle.log 2>&1 || status=$?
+          gradle testReleaseUnitTest assembleRelease --console=plain --no-daemon > build/gradle.log 2>&1 || status=$?
           tail -n 40 build/gradle.log
           # Errors as annotations, readable without downloading the log:
           # Kotlin compiler (e: file:///…/X.kt:12:5 message), then Gradle's summary.
@@ -105,6 +109,7 @@ jobs:
             echo "### APK: \`$name\`"
             echo "Подпись (SHA-256 сертификата): \`$cert\`"
             echo "Сервер: ${{ vars.MUSIK_SERVER_URL != '' && 'задан из MUSIK_SERVER_URL' || 'не задан' }}"
+            echo "Fallback CDN: ${{ vars.MUSIK_FALLBACK_URL != '' && 'задан из MUSIK_FALLBACK_URL' || 'не задан' }}"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "::notice::APK ${name} подписан сертификатом ${cert:0:23}…"
 
