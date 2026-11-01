@@ -11,7 +11,6 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.StartOffset
@@ -52,7 +51,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Radio
 import androidx.compose.material.icons.filled.Share
@@ -229,12 +227,6 @@ fun HomeScreen() {
                         }
                     }
                     RadioCard()
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ChipButton(onClick = { scope.launch { refreshMixes(model) } }, enabled = !model.buildingMixes) {
-                            if (model.buildingMixes) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
-                            Text(if (model.buildingMixes) "Собираю…" else "Обновить миксы")
-                        }
-                    }
                 }
             }
             if (!model.loaded) {
@@ -243,7 +235,27 @@ fun HomeScreen() {
 
             val main = model.mixes.filter { !it.isWeekday }
             val week = model.mixes.filter { it.isWeekday }
-            if (main.isNotEmpty()) item { Shelf("Для тебя") { items(main) { MixCard(it) { playMix(it) } } } }
+            if (model.loaded) item {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Миксы", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
+                            Text("Для тебя", color = MusikColors.muted, style = MaterialTheme.typography.bodySmall)
+                        }
+                        ChipButton(onClick = { scope.launch { refreshMixes(model) } }, enabled = !model.buildingMixes) {
+                            if (model.buildingMixes) CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp, color = Color.White)
+                            Text(if (model.buildingMixes) "Собираю…" else "Обновить")
+                        }
+                    }
+                    androidx.compose.foundation.lazy.LazyRow(
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) { items(main) { MixCard(it) { playMix(it) } } }
+                }
+            }
             if (week.isNotEmpty()) item { Shelf("Дни недели") { items(week) { MixCard(it) { playMix(it) } } } }
 
             val favTracks = (model.favorites.tracks ?: emptyList()).map { it.asTrack() }
@@ -428,3 +440,4 @@ private suspend fun refreshMixes(model: HomeModel) {
         model.buildingMixes = false
     }
 }
+
