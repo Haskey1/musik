@@ -43,6 +43,19 @@ Actions на macOS-раннере — workflow [`ios`](../.github/workflows/ios.
 
 `.ipa` не подписан — подпись делает sideload-инструмент твоим Apple ID.
 
+### Основной и резервный домены
+
+В *Settings → Secrets and variables → Actions → Variables* репозитория задай:
+
+- `MUSIK_SERVER_URL` — основной адрес, например `https://music.example.com`;
+- `MUSIK_FALLBACK_URL` — резервный CDN, например `https://cdn.example.com`.
+
+Оба значения встраиваются в приложение во время сборки. При сетевой ошибке,
+таймауте или HTTP 5xx от основного домена приложение повторяет запрос через
+резервный и использует его до перезапуска. Это относится к API, обложкам,
+аудиопотоку и предзагрузке треков. HTTP 401 и другие 4xx не вызывают переключения.
+После перезапуска приложение снова начинает с основного домена.
+
 ## Установка на iPhone с Windows (бесплатный Apple ID)
 
 Через [Sideloadly](https://sideloadly.io):
@@ -81,4 +94,3 @@ cd ios && xcodegen generate && open Musik.xcodeproj
 Структура: `Musik/App` (точка входа, AppState), `Musik/Core` (API-клиент,
 модели, Keychain, загрузка обложек), `Musik/Playback` (PlayerController на
 AVPlayer + MediaPlayer), `Musik/Views` (экраны SwiftUI).
-
