@@ -23,7 +23,16 @@ final class Settings: @unchecked Sendable {
         return raw.hasPrefix("$(") ? "" : normalize(raw)
     }
 
-    private var customServer: String? { defaults.string(forKey: "baseURL").nonEmpty }
+    private var customServer: String? {
+        guard let saved = defaults.string(forKey: "baseURL").nonEmpty else { return nil }
+        let normalized = Self.normalize(saved)
+        // Older builds persisted the CI-provided primary as a custom address. Treat both
+        // built-in addresses as built-ins after an upgrade, or failover stays disabled.
+        if normalized == Self.builtInServer || normalized == Self.builtInFallbackServer {
+            return nil
+        }
+        return normalized
+    }
 
     var baseURL: String {
         get {
