@@ -18,7 +18,8 @@ APK собирает GitHub Actions (`.github/workflows/android.yml`) на ка�
 
 | Где | Имя | Что |
 |-----|-----|-----|
-| Variables | `MUSIK_SERVER_URL` | адрес сервера, встраивается в приложение; поле адреса на экране входа скрыто |
+| Variables | `MUSIK_SERVER_URL` | основной адрес сервера, встраивается в приложение; поле адреса на экране входа скрыто |
+| Variables | `MUSIK_FALLBACK_URL` | резервный CDN; используется при сетевой ошибке или HTTP 502/503/504 на основном домене |
 | Secrets | `ANDROID_KEYSTORE_BASE64` | keystore для подписи, в base64 |
 | Secrets | `ANDROID_KEYSTORE_PASSWORD` | пароль keystore |
 | Secrets | `ANDROID_KEY_ALIAS` | alias ключа |
@@ -36,8 +37,12 @@ keytool -genkeypair -keystore musik-release.jks -storetype PKCS12 -alias musik \
 base64 -w0 musik-release.jks   # → ANDROID_KEYSTORE_BASE64
 ```
 
-Локально: `cd android && gradle assembleRelease` (JDK 17, Android SDK 35), адрес сервера —
-переменной окружения `MUSIK_SERVER_URL`.
+Локально: `cd android && gradle testReleaseUnitTest assembleRelease` (JDK 17, Android SDK 35),
+адреса сервера — переменными окружения `MUSIK_SERVER_URL` и `MUSIK_FALLBACK_URL`.
+
+Fallback работает только для встроенной пары доменов. Если пользователь вошёл через собственный
+адрес, приложение не переключается на CDN и не отправляет токен на посторонний хост. Старый
+системный адрес из `baseUrl` при обновлении мигрирует как встроенный, а не как пользовательский.
 
 ## Вход
 
@@ -76,3 +81,4 @@ app/src/main/java/app/musik/android/
 Следующие два трека скачиваются заранее; если сервер пропал, плеер продолжает с телефона
 (предзагруженное, потом сохранённое) и раз в 15 с проверяет связь, а когда она вернулась —
 на границе трека снова включает онлайн-радио.
+
