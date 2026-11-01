@@ -93,8 +93,9 @@ extension APIClient {
     }
 
     func similarAlbums(artist: String?, album: String) async throws -> [AlbumItem] {
-        try await get("/api/similar/albums", query: [.init(name: "artist", value: artist ?? ""), .init(name: "album", value: album)],
-                      as: AlbumsResponse.self).albums ?? []
+        try await get("/api/similar/albums", query: [
+            .init(name: "artist", value: artist ?? ""), .init(name: "album", value: album),
+        ], as: AlbumsResponse.self).albums ?? []
     }
 
     func discover(resurfaced: Bool) async throws -> [DiscoverTip] {
@@ -119,13 +120,15 @@ extension APIClient {
         return try await post("/api/rules", body)
     }
 
-    func rules() async throws -> [RadioRule] { try await get("/api/rules", as: RulesResponse.self).rules }
+    func rules() async throws -> [RadioRule] {
+        try await get("/api/rules", as: RulesResponse.self).rules
+    }
 
     func deleteRule(_ id: String) async throws {
         _ = try await send("DELETE", "/api/rules/\(id)")
     }
 
-    func addLater(_ trackId: Int) async throws {
+    func addLater(trackId: Int) async throws {
         _ = try await send("POST", "/api/later", body: ["track_id": trackId])
     }
 
