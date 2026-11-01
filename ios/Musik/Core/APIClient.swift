@@ -42,8 +42,11 @@ final class APIClient: @unchecked Sendable {
     // MARK: URLs
 
     func url(_ path: String, query: [URLQueryItem] = []) throws -> URL {
-        let base = settings.baseURL
-        guard !base.isEmpty, var comps = URLComponents(string: base + path) else {
+        try url(path, query: query, baseURL: settings.baseURL)
+    }
+
+    private func url(_ path: String, query: [URLQueryItem], baseURL: String) throws -> URL {
+        guard !baseURL.isEmpty, var comps = URLComponents(string: baseURL + path) else {
             throw APIError(status: 0, code: "bad_url", message: "Неверный адрес сервера")
         }
         if !query.isEmpty {
@@ -79,12 +82,38 @@ final class APIClient: @unchecked Sendable {
         return try? url(path, query: query)
     }
 
+    /// AVPlayer does not use URLSession, so the player asks for this switch when its
+    /// stream fails. The next stream URL is then built on the fallback domain.
+    func switchToFallback() -> Bool {
+        settings.activateFallback(after: settings.baseURL) != nil
+    }
+
     // MARK: Requests
 
     func send(_ method: String, _ path: String, query: [URLQueryItem] = [],
               body: [String: Any]? = nil, redirectOn401: Bool = true,
               timeout: TimeInterval? = nil) async throws -> Data {
-        var req = URLRequest(url: try url(path, query: query))
+        var base = settings.baseURL
+        var triedFallback = false
+        while true {
+            do {
+                return try await performSend(method, path, query: query, body: body,
+                                             redirectOn401: redirectOn401, timeout: timeout, baseURL: base)
+            } catch {
+                guard !triedFallback,
+                      let e = error as? APIError,
+                      Self.isUnavailable(e),
+                      let fallback = settings.activateFallback(after: base) else { throw error }
+                triedFallback = true
+                base = fallback
+            }
+        }
+    }
+
+    private func performSend(_ method: String, _ path: String, query: [URLQueryItem],
+                             body: [String: Any]?, redirectOn401: Bool,
+                             timeout: TimeInterval?, baseURL: String) async throws -> Data {
+        var req = URLRequest(url: try url(path, query: query, baseURL: baseURL))
         req.httpMethod = method
         if let timeout { req.timeoutInterval = timeout }
         req.setValue("application/json", forHTTPHeaderField: "Accept")
@@ -132,14 +161,93 @@ final class APIClient: @unchecked Sendable {
 
     /// Fetches raw bytes (artwork) with the same auth as API calls.
     func data(from url: URL) async throws -> Data {
+        var target = url
+        var triedFallback = false
+        while true {
+            do {
+                return try await performData(from: target)
+            } catch {
+                guard !triedFallback,
+                      let e = error as? APIError,
+                      Self.isUnavailable(e),
+                      let fallbackTarget = rehostedOnFallback(target) else { throw error }
+                triedFallback = true
+                target = fallbackTarget
+            }
+        }
+    }
+
+    private func performData(from url: URL) async throws -> Data {
         var req = URLRequest(url: url)
         for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
-        let (data, resp) = try await session.data(for: req)
+        let data: Data
+        let resp: URLResponse
+        do {
+            (data, resp) = try await session.data(for: req)
+        } catch let e as URLError where e.code == .cancelled {
+            throw CancellationError()
+        } catch let e as URLError {
+            throw APIError(status: 0, code: "network", message: Self.describe(e))
+        }
         let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             throw APIError(status: status, code: nil, message: "HTTP \(status)")
         }
         return data
+    }
+
+    /// Downloads audio with the same failover as JSON and artwork requests.
+    func download(from url: URL, timeout: TimeInterval) async throws -> (URL, URLResponse) {
+        var target = url
+        var triedFallback = false
+        while true {
+            do {
+                return try await performDownload(from: target, timeout: timeout)
+            } catch {
+                guard !triedFallback,
+                      let e = error as? APIError,
+                      Self.isUnavailable(e),
+                      let fallbackTarget = rehostedOnFallback(target) else { throw error }
+                triedFallback = true
+                target = fallbackTarget
+            }
+        }
+    }
+
+    private func performDownload(from url: URL, timeout: TimeInterval) async throws -> (URL, URLResponse) {
+        var req = URLRequest(url: url)
+        req.timeoutInterval = timeout
+        for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
+        let tmp: URL
+        let resp: URLResponse
+        do {
+            (tmp, resp) = try await session.download(for: req)
+        } catch let e as URLError where e.code == .cancelled {
+            throw CancellationError()
+        } catch let e as URLError {
+            throw APIError(status: 0, code: "network", message: Self.describe(e))
+        }
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
+        guard (200..<300).contains(status) else {
+            try? FileManager.default.removeItem(at: tmp)
+            throw APIError(status: status, code: nil, message: "HTTP \(status)")
+        }
+        return (tmp, resp)
+    }
+
+    /// Rehosts an internal URL on the fallback, preserving its escaped path and query.
+    private func rehostedOnFallback(_ url: URL) -> URL? {
+        let candidates = [settings.baseURL, Settings.builtInServer, Settings.builtInFallbackServer]
+        guard let base = candidates.first(where: {
+            !$0.isEmpty && (url.absoluteString == $0 || url.absoluteString.hasPrefix($0 + "/"))
+        }), let fallback = settings.activateFallback(after: base) else { return nil }
+        let suffix = url.absoluteString.dropFirst(base.count)
+        guard let target = URL(string: fallback + String(suffix)) else { return nil }
+        return target
+    }
+
+    private static func isUnavailable(_ e: APIError) -> Bool {
+        (e.status == 0 && e.code == "network") || e.status >= 500
     }
 
     private static func describe(_ e: URLError) -> String {
