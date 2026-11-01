@@ -212,12 +212,6 @@ private fun TopBar(track: Track, onClose: () -> Unit, onEqualizer: () -> Unit) {
             IconButton(onClick = onClose) {
                 Icon(Icons.Filled.KeyboardArrowDown, "Свернуть", Modifier.size(30.dp), tint = Color.White)
             }
-            // radio only: this track is not the mood, offer something different
-            if (!player.fixed && !player.offlineMode) {
-                IconButton(onClick = { Haptics.press(context, App.settings); player.changeMood() }, enabled = !player.busy) {
-                    Icon(Icons.Filled.Cached, "Другое", Modifier.size(22.dp), tint = Color.White)
-                }
-            }
         }
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { shareText(context, Links.track(App.settings.baseUrl, track)) }) {
@@ -442,6 +436,16 @@ private fun Actions(track: Track, lyricsOn: Boolean, onLyrics: () -> Unit) {
             GlassChip(onClick = { player.playSimilarNow() }, cell(), horizontalPadding = 8.dp) {
                 Icon(Icons.Filled.AutoAwesome, null, Modifier.size(16.dp)); Text("Похожее", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
+            if (!player.fixed && !player.offlineMode) {
+                GlassChip(
+                    onClick = { Haptics.press(context, App.settings); player.changeMood() },
+                    cell(), horizontalPadding = 8.dp, enabled = !player.busy,
+                ) {
+                    Icon(Icons.Filled.Cached, null, Modifier.size(16.dp)); Text("Другое", maxLines = 1, softWrap = false, fontSize = 13.sp)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             GlassChip(onClick = onLyrics, cell(), horizontalPadding = 8.dp, active = lyricsOn) {
                 Icon(Icons.AutoMirrored.Filled.Notes, null, Modifier.size(16.dp)); Text("Текст", maxLines = 1, softWrap = false, fontSize = 13.sp)
             }
@@ -534,3 +538,4 @@ private fun khz(hz: Int): String {
     val k = hz / 1000.0
     return if (k % 1.0 == 0.0) "${k.toInt()} кГц" else String.format(java.util.Locale.US, "%.1f", k).replace('.', ',') + " кГц"
 }
+
