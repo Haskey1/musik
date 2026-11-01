@@ -46,6 +46,8 @@ class AppState(
     var onSignedOut: (clearSession: Boolean) -> Unit = {}
     var onFavoritesLoaded: (List<Track>) -> Unit = {}
     var onFavoriteChanged: (Track, Boolean) -> Unit = { _, _ -> }
+    var hasSavedTracks: () -> Boolean = { false }
+    var offlineFavoriteIds: () -> Set<Int> = { emptySet() }
 
     private var toastJob: Job? = null
 
@@ -58,7 +60,7 @@ class AppState(
     fun bootstrap() {
         scope.launch {
             if (settings.baseUrl.isEmpty()) {
-                phase = Phase.Login
+                if (hasSavedTracks()) openOffline() else phase = Phase.Login
                 return@launch
             }
             try {
@@ -70,18 +72,23 @@ class AppState(
                     phase = Phase.Login
                 }
             } catch (e: ApiError) {
-                if (e.status == 0 && (settings.token != null || settings.cookies().isNotEmpty())) {
-                    // No connection, but we were signed in before: open the app with what is
-                    // saved on the phone instead of the login screen.
-                    offlineLaunch = true
-                    phase = Phase.Ready
-                    show("Нет связи с сервером — играют сохранённые треки")
+                if (e.status == 0 && (settings.token != null || settings.cookies().isNotEmpty() || hasSavedTracks())) {
+                    // A previous session or local downloads are enough: never replace offline
+                    // listening with a login form just because the network is absent.
+                    openOffline()
                 } else {
                     phase = Phase.Login
                     show(e)
                 }
             }
         }
+    }
+
+    private fun openOffline() {
+        offlineLaunch = true
+        favoriteTracks = offlineFavoriteIds()
+        phase = Phase.Ready
+        show("Нет связи с сервером — открыты сохранённые треки")
     }
 
     private suspend fun afterSignIn() {

@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -19,21 +18,14 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.WifiOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.musik.android.data.formatBytes
@@ -54,7 +46,6 @@ fun DownloadsScreen() {
     val player = App.player
     val offline = App.offline
     val items = offline.savedTracks
-    var confirmClear by remember { mutableStateOf(false) }
 
     fun play(index: Int, shuffle: Boolean) = player.playOffline(items.map { it.track }, index, shuffle)
 
@@ -83,7 +74,7 @@ fun DownloadsScreen() {
         if (items.isEmpty()) item { EmptyHint("Пока пусто. Жми ↓ у трека или ставь ♥ — лайкнутые сохраняются сами.") }
         itemsIndexed(items) { i, s ->
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { TrackRow(s.track) { play(i, false) } }
+                Box(Modifier.weight(1f)) { TrackRow(s.track, unlikable = true) { play(i, false) } }
                 IconButton(onClick = { offline.remove(s.id) }) { Icon(Icons.Filled.DeleteOutline, "Удалить", tint = MusikColors.muted) }
             }
         }
@@ -93,31 +84,9 @@ fun DownloadsScreen() {
                 Text("Загружается: ${offline.downloading.size}", color = MusikColors.muted)
             }
         }
-        item {
-            Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
-                Section("Настройки") {
-                    Toggle("Сохранять лайкнутые", offline.autoSaveFavorites, "Лайкнутые треки сохраняются сами и удаляются, если снять ♥.") {
-                        offline.updateAutoSave(it)
-                        if (it) state.perform { state.refreshFavorites() }
-                    }
-                    if (items.isNotEmpty()) {
-                        TextButton(onClick = { confirmClear = true }) { Text("Удалить все сохранённые", color = Color(0xFFFF6B6B)) }
-                    }
-                }
-            }
-        }
     }
 
         StatusBarScrim()
     }
-
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("Удалить все сохранённые треки?") },
-            confirmButton = { TextButton(onClick = { confirmClear = false; offline.removeAll() }) { Text("Удалить", color = Color(0xFFFF6B6B)) } },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Отмена") } },
-            containerColor = MusikColors.surfaceHigh,
-        )
-    }
 }
+
