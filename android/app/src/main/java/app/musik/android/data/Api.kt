@@ -92,9 +92,8 @@ class Api(private val settings: Settings) {
     private val authInterceptor = Interceptor { chain ->
         val req = chain.request()
         val token = settings.token
-        val base = settings.baseUrl.toHttpUrlOrNull()
-        // Only our own server gets the token.
-        if (token != null && base != null && req.url.host == base.host && req.header("Authorization") == null) {
+        // Only the custom server or the managed primary/fallback pair gets the token.
+        if (token != null && settings.isTrustedHost(req.url.host) && req.header("Authorization") == null) {
             chain.proceed(req.newBuilder().header("Authorization", "Bearer $token").build())
         } else {
             chain.proceed(req)
@@ -113,8 +112,9 @@ class Api(private val settings: Settings) {
 
     // MARK: URLs
 
-    fun url(path: String, query: List<Pair<String, String>> = emptyList()): HttpUrl {
-        val base = settings.baseUrl
+    fun url(path: String, query: List<Pair<String, String>> = emptyList()): HttpUrl = url(settings.baseUrl, path, query)
+
+    private fun url(base: String, path: String, query: List<Pair<String, String>>): HttpUrl {
         val parsed = (base + path).toHttpUrlOrNull()
         if (base.isEmpty() || parsed == null) throw ApiError(0, "bad_url", "Неверный адрес сервера")
         if (query.isEmpty()) return parsed
@@ -142,34 +142,42 @@ class Api(private val settings: Settings) {
         redirectOn401: Boolean = true,
         timeoutSeconds: Long? = null,
     ): String {
-        val builder = Request.Builder().url(url(path, query)).header("Accept", "application/json")
-        if (method == "GET") {
-            builder.get()
-        } else {
-            val text = (body ?: JsonObject(emptyMap())).toString()
-            builder.method(method, text.toRequestBody("application/json".toMediaType()))
-        }
         val client = if (timeoutSeconds != null) {
             http.newBuilder().callTimeout(timeoutSeconds, TimeUnit.SECONDS).build()
         } else http
-        val response = try {
-            client.newCall(builder.build()).await()
-        } catch (e: IOException) {
-            throw ApiError(0, "network", describe(e))
-        }
-        return withContext(Dispatchers.IO) {
-            response.use { resp ->
-                val text = resp.body?.string() ?: ""
-                if (!resp.isSuccessful) {
-                    val env = runCatching { JsonFormat.parseToJsonElement(text).jsonObject }.getOrNull()
-                    val code = env?.get("code")?.jsonPrimitive?.contentOrNull
-                    val msg = env?.get("error")?.jsonPrimitive?.contentOrNull
-                    if (resp.code == 401 && redirectOn401) {
-                        withContext(Dispatchers.Main) { onUnauthorized?.invoke() }
-                    }
-                    throw ApiError(resp.code, code, msg ?: "Ошибка сервера (HTTP ${resp.code})")
+        var base = settings.baseUrl
+        while (true) {
+            try {
+                val builder = Request.Builder().url(url(base, path, query)).header("Accept", "application/json")
+                if (method == "GET") {
+                    builder.get()
+                } else {
+                    val text = (body ?: JsonObject(emptyMap())).toString()
+                    builder.method(method, text.toRequestBody("application/json".toMediaType()))
                 }
-                text
+                val response = client.newCall(builder.build()).await()
+                return withContext(Dispatchers.IO) {
+                    response.use { resp ->
+                        val text = resp.body?.string() ?: ""
+                        if (!resp.isSuccessful) {
+                            val env = runCatching { JsonFormat.parseToJsonElement(text).jsonObject }.getOrNull()
+                            val code = env?.get("code")?.jsonPrimitive?.contentOrNull
+                            val msg = env?.get("error")?.jsonPrimitive?.contentOrNull
+                            if (resp.code == 401 && redirectOn401) {
+                                withContext(Dispatchers.Main) { onUnauthorized?.invoke() }
+                            }
+                            throw ApiError(resp.code, code, msg ?: "Ошибка сервера (HTTP ${resp.code})")
+                        }
+                        text
+                    }
+                }
+            } catch (e: IOException) {
+                base = settings.fallbackAfterFailure(base)
+                    ?: throw ApiError(0, "network", describe(e))
+            } catch (e: ApiError) {
+                // A gateway/CDN error on the primary is as unavailable as a connection failure.
+                if (e.status !in setOf(502, 503, 504)) throw e
+                base = settings.fallbackAfterFailure(base) ?: throw e
             }
         }
     }
@@ -217,14 +225,11 @@ class Api(private val settings: Settings) {
     }
 
     /** Quick reachability check with a short timeout (the offline player polls it). */
-    suspend fun ping(): Boolean {
-        val target = runCatching { url("/api/health") }.getOrNull() ?: return false
-        val client = http.newBuilder().callTimeout(6, TimeUnit.SECONDS).build()
-        return try {
-            client.newCall(Request.Builder().url(target).build()).await().use { it.code in 1..499 }
-        } catch (e: IOException) {
-            false
-        }
+    suspend fun ping(): Boolean = try {
+        send("GET", "/api/health", redirectOn401 = false, timeoutSeconds = 6)
+        true
+    } catch (e: ApiError) {
+        e.status in 400..499
     }
 
     suspend fun logout() {
@@ -345,3 +350,4 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     })
     cont.invokeOnCancellation { runCatching { cancel() } }
 }
+

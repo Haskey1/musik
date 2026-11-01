@@ -86,6 +86,7 @@ private val tabs = listOf(
 @Composable
 fun MainScreen(state: AppState) {
     val nav = rememberNavController()
+    val initialTab = remember { if (state.offlineLaunch) Routes.DOWNLOADS else Routes.HOME }
     var showPlayer by rememberSaveable { mutableStateOf(false) }
     val navigator = remember(nav) { Navigator(nav) { showPlayer = false } }
     val player = App.player
@@ -93,7 +94,7 @@ fun MainScreen(state: AppState) {
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     // the tab the user is in, also while a page of it (artist, album, search) is open
-    var activeTab by rememberSaveable { mutableStateOf(Routes.HOME) }
+    var activeTab by rememberSaveable { mutableStateOf(initialTab) }
     LaunchedEffect(route) { if (tabs.any { it.route == route }) activeTab = route!! }
 
     LaunchedEffect(Unit) {
@@ -149,7 +150,7 @@ fun MainScreen(state: AppState) {
                     }
                 },
             ) { padding ->
-                NavHost(nav, startDestination = Routes.HOME, modifier = Modifier.padding(bottom = padding.calculateBottomPadding())) {
+                NavHost(nav, startDestination = initialTab, modifier = Modifier.padding(bottom = padding.calculateBottomPadding())) {
                     composable(Routes.HOME) { HomeScreen() }
                     composable(Routes.LIBRARY) { LibraryScreen() }
                     composable(Routes.DOWNLOADS) { DownloadsScreen() }
@@ -231,3 +232,4 @@ private fun MiniProgress() {
         Box(Modifier.fillMaxWidth(fraction).fillMaxHeight().background(MusikColors.accent))
     }
 }
+
