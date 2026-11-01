@@ -12,7 +12,7 @@ struct SavedTrack: Codable, Identifiable, Hashable {
     var file: String
     var bytes: Int64
     var savedAt: Date
-    /// Saved automatically because the track is liked; removed again when the like goes.
+    /// Saved automatically because the track was liked; removed again when the like goes.
     var auto: Bool
 
     var track: Track {
@@ -23,7 +23,7 @@ struct SavedTrack: Codable, Identifiable, Hashable {
 /// Audio files on the device, in two places:
 ///
 /// * **Saved** (Application Support/Offline): tracks the user saved or liked. Kept until
-///   removed, listed on the «Сохранённые» tab, played when there is no connection.
+///   removed, listed in the «Сохранённые» tab, played when there is no connection.
 /// * **Prefetch** (Caches/Prefetch): the next couple of tracks of the current radio or
 ///   playlist, downloaded ahead so a dropped connection does not stop playback. A small
 ///   rolling cache; iOS may also clear it when space runs low.
@@ -245,12 +245,9 @@ final class OfflineStore: ObservableObject {
     /// the response type, because AVPlayer recognises local files by it.
     private func fetchAudio(_ track: Track, into dir: URL) async -> URL? {
         guard let api, let url = api.streamURL(for: track) else { return nil }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 60
-        for (k, v) in api.authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
         do {
-            let (tmp, resp) = try await api.session.download(for: req)
-            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let (tmp, resp) = try await api.download(from: url, timeout: 60)
+            guard let http = resp as? HTTPURLResponse else {
                 try? FileManager.default.removeItem(at: tmp)
                 return nil
             }
