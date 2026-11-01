@@ -5,9 +5,11 @@ from __future__ import annotations
 import logging
 import urllib.error
 import urllib.request
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from musik.artwork.artists import fetch_library_artist_photos
 from musik.brain.generators import generate_daily
 from musik.brain.mixes import generate_mix_pack
 from musik.brain.train_ranker import train_ranker
@@ -32,6 +34,7 @@ JOB_KINDS = frozenset(
         "full_rescan",
         "mix_pack",
         "train_ranker",
+        "artist_photos",
     }
 )
 
@@ -185,6 +188,15 @@ def _run_album_tips(payload: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _run_artist_photos(payload: dict[str, Any]) -> dict[str, Any]:
+    result = fetch_library_artist_photos(
+        limit=payload.get("limit"),
+        force=bool(payload.get("force", False)),
+        delay_sec=float(payload.get("delay_sec", 0.5)),
+    )
+    return asdict(result)
+
+
 def _run_full_rescan(payload: dict[str, Any], *, job_id: int | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {}
     if job_id is not None:
@@ -235,6 +247,8 @@ def _process_job(job: dict[str, Any]) -> dict[str, Any]:
         return _run_full_rescan(payload, job_id=job_id)
     if kind == "train_ranker":
         return _run_train_ranker(payload)
+    if kind == "artist_photos":
+        return _run_artist_photos(payload)
     raise ValueError(f"unknown job kind: {kind}")
 
 
