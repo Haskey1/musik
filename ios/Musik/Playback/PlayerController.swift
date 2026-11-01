@@ -711,7 +711,7 @@ final class PlayerController: ObservableObject {
               let track = current, duration > 0 else { return }
         let fade = Double(settings.crossfadeSeconds)
         let left = duration - position
-        // a short track (or a short tail) is left alone: the fade is at most a quarter of it
+        // a short track (or a short tail) is left alone; the fade is at most a quarter of it
         guard duration >= fade * 4, left <= fade + 0.5, left > 1 else { return }
         guard let next = upcomingTracks(1).first else { return }
         if settings.crossfadeKeepAlbums, Self.sameAlbum(track, next) { return }
@@ -1085,7 +1085,7 @@ final class PlayerController: ObservableObject {
             return .success
         }
         c.togglePlayPauseCommand.addTarget { [weak self] _ in
-            self?.togglePlayPause()
+            self?.togglePlay()
             return .success
         }
         c.nextTrackCommand.addTarget { [weak self] _ in
