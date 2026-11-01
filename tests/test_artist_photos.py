@@ -9,6 +9,8 @@ from musik.artwork import artists
 from musik.config import get_settings
 from musik.db.schema import init_db
 from musik.db.store import upsert_track
+from musik.jobs import runner
+from musik.jobs.queue import enqueue_job, get_job
 
 JPEG = b"\xff\xd8\xff\xe0" + b"photo" * 10
 PIC = "https://cdn-images.dzcdn.net/images/artist/abc/1000x1000-000000-80-0-0.jpg"
@@ -116,3 +118,34 @@ def test_library_run_uses_segments_and_remembers_misses(env, monkeypatch):
     # --force looks everyone up again.
     artists.fetch_library_artist_photos(delay_sec=0, force=True)
     assert sorted(asked) == ["Thomas", "Сплин"]
+
+
+def test_artist_photos_job_runs_from_queue(env, monkeypatch):
+    calls = {}
+
+    def fake_fetch(**kwargs):
+        calls.update(kwargs)
+        return artists.ArtistPhotoResult(total=3, found=1, missing=1, failed=1)
+
+    monkeypatch.setattr(runner, "fetch_library_artist_photos", fake_fetch)
+    queued = enqueue_job(
+        "artist_photos", {"limit": 3, "force": True, "delay_sec": 0}
+    )
+
+    summary = runner.run_one()
+
+    assert summary == {
+        "id": queued["id"],
+        "kind": "artist_photos",
+        "status": "done",
+        "result": {
+            "total": 3,
+            "found": 1,
+            "missing": 1,
+            "failed": 1,
+            "rate_limited": False,
+            "errors": [],
+        },
+    }
+    assert calls == {"limit": 3, "force": True, "delay_sec": 0.0}
+    assert get_job(queued["id"])["status"] == "done"
