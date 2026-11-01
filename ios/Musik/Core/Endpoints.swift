@@ -33,13 +33,18 @@ extension APIClient {
     }
 
     /// Quick reachability check with a short timeout (the offline player polls it).
+    /// Uses the same failover as other requests so a dead primary does not keep the
+    /// player offline while the fallback is available.
     func ping() async -> Bool {
-        guard let target = try? url("/api/health") else { return false }
-        var req = URLRequest(url: target, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 6)
-        for (k, v) in authHeaders() { req.setValue(v, forHTTPHeaderField: k) }
-        guard let result = try? await session.data(for: req) else { return false }
-        let status = (result.1 as? HTTPURLResponse)?.statusCode ?? 0
-        return status > 0 && status < 500
+        do {
+            _ = try await send("GET", "/api/health", redirectOn401: false, timeout: 6)
+            return true
+        } catch let e as APIError {
+            // A reachable server may reject auth, but a network error or 5xx may not.
+            return e.status > 0 && e.status < 500
+        } catch {
+            return false
+        }
     }
 
     func logout() async {
@@ -88,9 +93,8 @@ extension APIClient {
     }
 
     func similarAlbums(artist: String?, album: String) async throws -> [AlbumItem] {
-        try await get("/api/similar/albums", query: [
-            .init(name: "artist", value: artist ?? ""), .init(name: "album", value: album),
-        ], as: AlbumsResponse.self).albums ?? []
+        try await get("/api/similar/albums", query: [.init(name: "artist", value: artist ?? ""), .init(name: "album", value: album)],
+                      as: AlbumsResponse.self).albums ?? []
     }
 
     func discover(resurfaced: Bool) async throws -> [DiscoverTip] {
@@ -115,15 +119,13 @@ extension APIClient {
         return try await post("/api/rules", body)
     }
 
-    func rules() async throws -> [RadioRule] {
-        try await get("/api/rules", as: RulesResponse.self).rules
-    }
+    func rules() async throws -> [RadioRule] { try await get("/api/rules", as: RulesResponse.self).rules }
 
     func deleteRule(_ id: String) async throws {
         _ = try await send("DELETE", "/api/rules/\(id)")
     }
 
-    func addLater(trackId: Int) async throws {
+    func addLater(_ trackId: Int) async throws {
         _ = try await send("POST", "/api/later", body: ["track_id": trackId])
     }
 
