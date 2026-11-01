@@ -8,16 +8,56 @@ final class Settings: @unchecked Sendable {
     static let shared = Settings()
 
     private let defaults = UserDefaults.standard
+    private let serverLock = NSLock()
+    /// In-memory only: every launch tries the primary first, then can use the fallback.
+    private var activeBuiltInServer: String?
 
     /// Server address built into the app (Info.plist `MusikServerURL`); empty when none.
-    static let builtInServer: String = {
-        let raw = Bundle.main.object(forInfoDictionaryKey: "MusikServerURL") as? String ?? ""
+    static let builtInServer: String = builtInURL(forKey: "MusikServerURL")
+
+    /// Backup address built into the app (Info.plist `MusikFallbackURL`); empty when none.
+    static let builtInFallbackServer: String = builtInURL(forKey: "MusikFallbackURL")
+
+    private static func builtInURL(forKey key: String) -> String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String ?? ""
         return raw.hasPrefix("$(") ? "" : normalize(raw)
-    }()
+    }
+
+    private var customServer: String? { defaults.string(forKey: "baseURL").nonEmpty }
 
     var baseURL: String {
-        get { defaults.string(forKey: "baseURL").nonEmpty ?? Settings.builtInServer }
-        set { defaults.set(Settings.normalize(newValue), forKey: "baseURL") }
+        get {
+            if let customServer { return customServer }
+            return serverLock.withLock { activeBuiltInServer } ?? Self.builtInServer
+        }
+        set {
+            let normalized = Self.normalize(newValue)
+            serverLock.withLock {
+                activeBuiltInServer = normalized == Self.builtInFallbackServer ? normalized : nil
+            }
+            // Keep the two CI-provided addresses as built-ins, not as a custom server:
+            // otherwise entering them on the login screen would disable failover.
+            if normalized == Self.builtInServer || normalized == Self.builtInFallbackServer {
+                defaults.removeObject(forKey: "baseURL")
+            } else {
+                defaults.set(normalized, forKey: "baseURL")
+            }
+        }
+    }
+
+    /// Switches a built-in primary to the fallback once. Custom server addresses and an
+    /// already active fallback are left alone. Returns the address for an immediate retry.
+    func activateFallback(after failedBaseURL: String) -> String? {
+        guard customServer == nil,
+              !Self.builtInServer.isEmpty,
+              !Self.builtInFallbackServer.isEmpty,
+              Self.builtInFallbackServer != Self.builtInServer else { return nil }
+        return serverLock.withLock {
+            let current = activeBuiltInServer ?? Self.builtInServer
+            guard failedBaseURL == current, current == Self.builtInServer else { return nil }
+            activeBuiltInServer = Self.builtInFallbackServer
+            return Self.builtInFallbackServer
+        }
     }
 
     var token: String? {
