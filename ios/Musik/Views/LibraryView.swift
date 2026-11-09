@@ -2,18 +2,18 @@ import SwiftUI
 
 struct LibraryView: View {
     enum Segment: String, CaseIterable, Identifiable {
-        case all = "Все"
         case tracks = "Треки"
         case artists = "Артисты"
         case albums = "Альбомы"
         case favorites = "Любимое"
+        case all = "Обзор"
         var id: String { rawValue }
     }
 
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
 
-    @State private var segment: Segment = .all
+    @State private var segment: Segment = .tracks
     @State private var query = ""
     @State private var tracks: [Track] = []
     @State private var artists: [ArtistItem] = []
@@ -24,9 +24,13 @@ struct LibraryView: View {
     var body: some View {
         List {
             Picker("Раздел", selection: $segment) {
-                ForEach(Segment.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(Segment.allCases) { item in
+                    Text(segmentTitle(item)).tag(item)
+                }
             }
             .pickerStyle(.segmented)
+            .padding(6)
+            .background(Theme.surfaceHigh.opacity(0.82), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
 
@@ -43,11 +47,14 @@ struct LibraryView: View {
             }
         }
         .listStyle(.plain)
+        .listRowSpacing(6)
         .resetScrollOnReselect(tab: 1)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
-        .navigationTitle("Библиотека")
-        .searchable(text: $query, prompt: "Поиск")
+        .navigationTitle("Моя музыка")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbarBackground(Theme.background.opacity(0.94), for: .navigationBar)
+        .searchable(text: $query, prompt: "Найти в библиотеке")
         .refreshable { await load() }
         .task { if !loaded { await load() } }
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
@@ -60,8 +67,10 @@ struct LibraryView: View {
     private var tracksSection: some View {
         let list = filteredTracks
         ForEach(Array(list.enumerated()), id: \.element.id) { i, t in
-            TrackRow(track: t) { playFromLibrary(list, at: i) }
+            TrackRow(track: t, carded: true, showsMenu: true) { playFromLibrary(list, at: i) }
+                .listRowInsets(EdgeInsets(top: 3, leading: 16, bottom: 3, trailing: 16))
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
         }
         if loaded && list.isEmpty {
             EmptyHint(text: query.isEmpty ? "Треков нет" : "Ничего не найдено").listRowBackground(Color.clear)
@@ -176,6 +185,10 @@ struct LibraryView: View {
 
     private func matchesTrack(_ t: Track) -> Bool {
         matches(t.title ?? "") || matches(t.artist ?? "") || matches(t.album ?? "")
+    }
+
+    private func segmentTitle(_ item: Segment) -> String {
+        item == .tracks && !tracks.isEmpty ? "Треки \(tracks.count)" : item.rawValue
     }
 
     /// Plays the visible list from the tapped row, so playback continues through it.
