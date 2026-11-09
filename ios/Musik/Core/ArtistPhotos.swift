@@ -36,6 +36,11 @@ final class ArtistPhotos: ObservableObject {
         return try? api.url(path, query: [URLQueryItem(name: "full", value: "1")])
     }
 
+    func hasPhoto(for artist: String?) -> Bool {
+        guard let artist else { return false }
+        return paths[Self.key(artist)] != nil
+    }
+
     /// Fetches the list; at most once in ten minutes unless forced.
     func refresh(_ api: APIClient, force: Bool = false) async {
         if !force, let loadedAt, Date().timeIntervalSince(loadedAt) < 600 { return }
