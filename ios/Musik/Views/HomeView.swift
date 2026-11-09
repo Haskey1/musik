@@ -69,7 +69,7 @@ struct HomeView: View {
                 .accessibilityLabel("Поиск")
                 .padding(.top, 4)
             }
-            RadioCard(refreshingMixes: refreshingMixes, refreshMixes: { Task { await refreshMixes() } })
+            RadioCard()
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -312,11 +312,6 @@ struct TipCard: View {
 private struct RadioCard: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
-    let refreshingMixes: Bool
-    let refreshMixes: () -> Void
-    @State private var shareItem: ShareItem?
-    @State private var sharing = false
-
     private let moods = ["Фокус", "Эпик", "Ночь", "Джаз", "Спокойно"]
     private var radioOn: Bool { player.current != nil && !player.fixed && !player.offlineMode }
 
@@ -369,26 +364,7 @@ private struct RadioCard: View {
                 MarqueeText(text: "\(track.displayArtist) · \(track.displayTitle)", font: .caption)
                     .foregroundStyle(Theme.muted)
             }
-            HStack(spacing: 20) {
-                Button {
-                    sharing = true
-                    app.perform {
-                        defer { sharing = false }
-                        if let raw = try await app.api.createShare().url, let url = URL(string: raw) {
-                            shareItem = ShareItem(url: url)
-                        }
-                    }
-                } label: {
-                    Label(sharing ? "Создаю…" : "Поделиться", systemImage: "square.and.arrow.up")
-                }
-                .disabled(sharing)
-                Button(action: refreshMixes) {
-                    Label(refreshingMixes ? "Собираю…" : "Обновить миксы", systemImage: "arrow.clockwise")
-                }
-                .disabled(refreshingMixes)
-            }
-            .font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
-            .buttonStyle(.plain)
+
         }
         .padding(22)
         .background(
@@ -397,9 +373,7 @@ private struct RadioCard: View {
             in: RoundedRectangle(cornerRadius: 28, style: .continuous)
         )
         .overlay(RoundedRectangle(cornerRadius: 28).stroke(Theme.accent.opacity(0.12)))
-        .sheet(item: $shareItem) { item in
-            ActivityView(items: [item.url]).presentationDetents([.medium, .large])
-        }
+
     }
 
     private var record: some View {
