@@ -4,6 +4,7 @@ import UIKit
 struct HomeView: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    @ObservedObject private var artistPhotos = ArtistPhotos.shared
 
     @State private var mixes: [Mix] = []
     @State private var favorites = FavoritesResponse()
@@ -51,11 +52,18 @@ struct HomeView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("musik").font(.display(40))
-                    Text(Labels.maturity(player.maturity ?? maturity))
-                        .font(.footnote)
-                        .foregroundStyle(Theme.teal)
+                HStack(spacing: 12) {
+                    Image(systemName: "music.note")
+                        .font(.title2.bold())
+                        .foregroundStyle(Theme.accentBright)
+                        .frame(width: 48, height: 48)
+                        .background(Theme.surfaceHigh, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("musik").font(.display(32))
+                        Text(greeting)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.muted)
+                    }
                 }
                 Spacer()
                 NavigationLink(value: Route.search) {
@@ -69,10 +77,30 @@ struct HomeView: View {
                 .accessibilityLabel("Поиск")
                 .padding(.top, 4)
             }
-            RadioCard()
+            RadioCard(heroArtist: heroArtist, fallbackTrackId: heroTrackId)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
+    }
+
+    private var greeting: String {
+        let hour = Calendar.current.component(.hour, from: Date())
+        if hour < 6 { return "Доброй ночи" }
+        if hour < 12 { return "Доброе утро" }
+        if hour < 18 { return "Добрый день" }
+        return "Добрый вечер"
+    }
+
+    private var heroArtist: String? {
+        if let current = player.current?.artist, artistPhotos.hasPhoto(for: current) { return current }
+        if let favorite = favorites.artists?.first(where: { artistPhotos.hasPhoto(for: $0.artist) }) {
+            return favorite.artist
+        }
+        return artists.first(where: { artistPhotos.hasPhoto(for: $0.artist) })?.artist
+    }
+
+    private var heroTrackId: Int? {
+        player.current?.id ?? tracks.first?.id ?? newTips.first?.coverTrackId
     }
 
     // MARK: Shelves
@@ -308,91 +336,113 @@ struct TipCard: View {
 }
 
 
-/// A roomy radio hero with direct access to favorites and mood contexts.
+/// The home radio hero. Artist photos are validated before this view receives
+/// them; unsuitable artwork automatically becomes a soft cover-derived scene.
 private struct RadioCard: View {
-    @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
-    private let moods = ["Фокус", "Эпик", "Ночь", "Джаз", "Спокойно"]
+
+    let heroArtist: String?
+    let fallbackTrackId: Int?
+
+    private let moods = [
+        MoodPreset(name: "Бодрое", icon: "bolt.fill", color: Theme.accent),
+        MoodPreset(name: "Спокойное", icon: "leaf.fill", color: Theme.teal),
+        MoodPreset(name: "Весёлое", icon: "face.smiling", color: Theme.accentBright),
+        MoodPreset(name: "Грустное", icon: "cloud.rain.fill", color: Color(hex: 0x7E665B)),
+    ]
+
     private var radioOn: Bool { player.current != nil && !player.fixed && !player.offlineMode }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("НАСТРОЙСЯ НА СВОЁ")
-                .font(.caption.weight(.bold)).tracking(2)
-                .foregroundStyle(Theme.accentBright)
-            HStack(alignment: .center, spacing: 12) {
-                Text("Твой день.\nТвоя музыка.")
-                    .font(.display(34)).fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                record
-            }
-            Text("Любимые треки и новые открытия — в одном потоке. Просто нажми play.")
-                .font(.subheadline).foregroundStyle(Theme.muted)
-                .fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 12) {
+            ZStack(alignment: .leading) {
+                RadioArtistBackdrop(artist: heroArtist, fallbackTrackId: fallbackTrackId)
 
-            VStack(spacing: 10) {
-                Button {
-                    Haptics.press()
-                    if radioOn { player.togglePlay() } else { player.startRadio() }
-                } label: {
-                    Label(radioOn && player.isPlaying ? "Пауза радио" : "Включить моё радио",
-                          systemImage: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
-                        .frame(maxWidth: .infinity, minHeight: 30)
-                }
-                .buttonStyle(PrimaryButtonStyle())
-                Button { player.playMix("favorites") } label: {
-                    Label("Вспомнить любимое", systemImage: "heart.fill")
-                        .font(.subheadline.weight(.semibold))
-                        .frame(maxWidth: .infinity, minHeight: 48)
-                        .background(Color.black.opacity(0.1), in: Capsule())
-                        .overlay(Capsule().stroke(Theme.accent.opacity(0.35)))
-                }
-                .buttonStyle(.plain)
-            }
-            .disabled(player.busy)
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("НАСТРОЙСЯ НА СВОЁ")
+                        .font(.caption.weight(.bold))
+                        .tracking(2)
+                        .foregroundStyle(Theme.accentBright)
 
-            // Wrap on narrow screens and with larger accessibility text sizes.
-            MoodLayout {
-                ForEach(moods, id: \.self) { mood in
-                    Button(mood) { player.startRadio(mood: mood) }
-                        .buttonStyle(ChipButtonStyle())
-                        .disabled(player.busy)
-                        .accessibilityLabel("Включить радио: \(mood)")
+                    Text("Твой день.\nТвоя музыка.")
+                        .font(.display(36))
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text("Любимое и новые открытия — в одном потоке.")
+                        .font(.subheadline)
+                        .foregroundStyle(Color.white.opacity(0.76))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 260, alignment: .leading)
+
+                    Spacer(minLength: 4)
+
+                    VStack(spacing: 10) {
+                        Button {
+                            Haptics.press()
+                            if radioOn { player.togglePlay() } else { player.startRadio() }
+                        } label: {
+                            Label(radioOn && player.isPlaying ? "Пауза радио" : "Включить моё радио",
+                                  systemImage: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
+                                .frame(maxWidth: .infinity, minHeight: 30)
+                        }
+                        .buttonStyle(PrimaryButtonStyle())
+
+                        Button { player.playMix("favorites") } label: {
+                            Label("Вспомнить любимое", systemImage: "heart")
+                                .font(.subheadline.weight(.semibold))
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .background(Color.black.opacity(0.22), in: Capsule())
+                                .overlay(Capsule().stroke(Color.white.opacity(0.3)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .disabled(player.busy)
+
+                    if radioOn, let track = player.current {
+                        MarqueeText(text: "\(track.displayArtist) · \(track.displayTitle)", font: .caption)
+                            .foregroundStyle(Color.white.opacity(0.76))
+                    }
+                }
+                .padding(22)
+            }
+            .frame(minHeight: 390)
+            .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 30).stroke(Color.white.opacity(0.1)))
+            .shadow(color: .black.opacity(0.28), radius: 22, y: 12)
+
+            MoodLayout(spacing: 8) {
+                ForEach(moods) { mood in
+                    Button { player.startRadio(mood: mood.name) } label: {
+                        Label(mood.name, systemImage: mood.icon)
+                    }
+                    .buttonStyle(MoodHeroButtonStyle(color: mood.color))
+                    .disabled(player.busy)
+                    .accessibilityLabel("Включить радио: \(mood.name)")
                 }
             }
-            if radioOn, let track = player.current {
-                MarqueeText(text: "\(track.displayArtist) · \(track.displayTitle)", font: .caption)
-                    .foregroundStyle(Theme.muted)
-            }
-
         }
-        .padding(22)
-        .background(
-            LinearGradient(colors: [Theme.surfaceHigh, Theme.surface, Theme.accent.opacity(0.12)],
-                           startPoint: .topLeading, endPoint: .bottomTrailing),
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 28).stroke(Theme.accent.opacity(0.12)))
-
     }
 
-    private var record: some View {
-        ZStack {
-            Circle().fill(Theme.accent)
-            ForEach(0..<3) { i in
-                Circle().stroke(Color.black.opacity(0.12), lineWidth: 2)
-                    .padding(CGFloat(8 + i * 9))
-            }
-            Circle().fill(Theme.background).padding(31)
-            if radioOn && player.isPlaying {
-                SoundBars().foregroundStyle(Theme.accentBright)
-            } else {
-                Image(systemName: "music.note").font(.title2.bold()).foregroundStyle(Theme.accentBright)
-            }
-        }
-        .frame(width: 104, height: 104)
-        .rotationEffect(.degrees(-15))
-        .accessibilityHidden(true)
+    private struct MoodPreset: Identifiable {
+        let name: String
+        let icon: String
+        let color: Color
+        var id: String { name }
+    }
+}
+
+private struct MoodHeroButtonStyle: ButtonStyle {
+    let color: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.footnote.weight(.semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 11)
+            .background(color.opacity(configuration.isPressed ? 0.58 : 0.82), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.12)))
+            .foregroundStyle(.white)
+            .scaleEffect(configuration.isPressed ? 0.96 : 1)
     }
 }
 
