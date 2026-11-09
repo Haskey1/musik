@@ -54,7 +54,49 @@ extension APIClient {
     func profile() async throws -> Profile { try await get("/api/profile") }
 
     func listeningStatistics() async throws -> ListeningStatistics {
-        try await get("/api/metrics/listening/summary")
+        // Read exactly the same responses and fields as the web profile.
+        struct WebTrack: Decodable {
+            var trackId: Int
+            var title: String
+            var artist: String
+            var plays: Int
+        }
+        struct WebPeriod: Decodable {
+            var listenedSec: Double
+            var plays: Int
+            var finishRate: Double
+            var topTracks: [WebTrack]?
+            var topArtists: [ArtistCount]?
+
+            var period: ListeningPeriod {
+                ListeningPeriod(listenedSeconds: listenedSec, plays: plays,
+                                finishRate: finishRate,
+                                tracks: (topTracks ?? []).map {
+                                    ListeningTrack(trackId: $0.trackId, title: $0.title,
+                                                   artist: $0.artist, count: $0.plays)
+                                }, artists: topArtists ?? [])
+            }
+        }
+        struct Week: Decodable { var listening: WebPeriod }
+        struct Year: Decodable {
+            var year: Int
+            var listenedSec: Double
+            var plays: Int
+            var finishRate: Double
+            var topTracks: [WebTrack]?
+            var topArtists: [ArtistCount]?
+
+            var period: ListeningPeriod {
+                WebPeriod(listenedSec: listenedSec, plays: plays, finishRate: finishRate,
+                          topTracks: topTracks, topArtists: topArtists).period
+            }
+        }
+        struct Memory: Decodable { var year: Year }
+        async let week: Week = get("/api/metrics/weekly")
+        async let memory: Memory = get("/api/metrics/listening")
+        let (w, m) = try await (week, memory)
+        return ListeningStatistics(year: m.year.year, weekly: w.listening.period,
+                                   yearly: m.year.period)
     }
 
     func saveExploreBounds(lo: Double, hi: Double) async throws {
