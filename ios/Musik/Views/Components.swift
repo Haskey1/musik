@@ -221,6 +221,8 @@ struct TrackRow: View {
     let track: Track
     var index: Int?
     var showArtwork = true
+    var carded = false
+    var showsMenu = false
     /// The heart is a button that takes the like back (the list of favourites).
     var unlikable = false
     let action: () -> Void
@@ -267,6 +269,28 @@ struct TrackRow: View {
                 Text(formatTime(track.duration))
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Theme.muted)
+                if showsMenu {
+                    Menu {
+                        TrackMenu(track: track)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(Theme.muted)
+                            .frame(width: 30, height: 34)
+                    }
+                }
+            }
+            .padding(.horizontal, carded ? 12 : 0)
+            .padding(.vertical, carded ? 10 : 0)
+            .background(
+                carded ? (isCurrent ? Theme.accent.opacity(0.18) : Theme.surface.opacity(0.82)) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .overlay {
+                if carded {
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .stroke(isCurrent ? Theme.accent.opacity(0.42) : Color.white.opacity(0.06))
+                }
             }
             .contentShape(Rectangle())
         }
