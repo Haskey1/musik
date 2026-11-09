@@ -11,34 +11,26 @@ import (
 
 // CoreOpts is the single candidate → feature → score → select path.
 type CoreOpts struct {
-	CurrentID   int64
-	Taste       []float32
-	Session     []float32
-	Daypart     []float32
-	Centroids   [][]float32
-	Contexts    []taste.ContextBlend
-	Exclude     map[int64]bool
-	Rules       *rules.Evaluator
-	Transitions map[int64]float64
-	Profile     TransitionProfile
-	Size        int
-	Now         time.Time
-	Model       *Model
-	Negative    func([]float32) float64
-	// ClusterPenalty is 0..1 per cluster skipped in this session; see clusterPenaltyWeight.
-	ClusterPenalty func(cluster int) float64
-	DaypartName    string
-	ContextIDs     []string
-	Discover       bool
-	// Shifted: the listener keeps skipping away; widen source quotas (ShiftQuotas).
-	Shifted    bool
-	Allocation *ExploreDecision
+	CurrentID         int64
+	Taste             []float32
+	Session           []float32
+	Daypart           []float32
+	Centroids         [][]float32
+	Contexts          []taste.ContextBlend
+	Exclude           map[int64]bool
+	Rules             *rules.Evaluator
+	Transitions       map[int64]float64
+	Profile           TransitionProfile
+	Size              int
+	Now               time.Time
+	Model             *Model
+	Negative          func([]float32) float64
+	DaypartName       string
+	ContextIDs        []string
+	Discover          bool
+	Allocation        *ExploreDecision
+	LearnedTransition *TransitionModel
 }
-
-// clusterPenaltyWeight: a cluster the listener keeps skipping loses this much score
-// at full penalty, more than the model gives a perfect taste match, so skips actually
-// move the radio instead of only nudging it.
-const clusterPenaltyWeight = 1.5
 
 func (b *Builder) BuildCore(opts CoreOpts) []Item {
 	if opts.Size < 1 {
@@ -78,24 +70,12 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 		currentMeta = &meta
 	}
 
-	collect := func(reject func(index.Meta) bool) []Candidate {
-		return CollectCandidates(b.Idx, opts.CurrentID, CandidateOpts{
-			Taste: opts.Taste, Current: currentVec, Session: opts.Session, Daypart: opts.Daypart,
-			Mood: mood, Place: place, Activity: activity, Centroids: opts.Centroids,
-			Exclude: opts.Exclude, Rules: opts.Rules, Now: opts.Now, Pool: 200, Reject: reject,
-		})
-	}
-	var cands []Candidate
-	if opts.Shifted && opts.ClusterPenalty != nil {
-		// a cluster the listener has clearly left is not even considered, as long as
-		// enough other music remains
-		cands = collect(func(m index.Meta) bool {
-			return m.ClusterID >= 0 && opts.ClusterPenalty(m.ClusterID) >= 0.7
-		})
-	}
-	if len(cands) < opts.Size {
-		cands = collect(nil)
-	}
+	cands := CollectCandidates(b.Idx, opts.CurrentID, CandidateOpts{
+		Taste: opts.Taste, Current: currentVec, Session: opts.Session, Daypart: opts.Daypart,
+		Mood: mood, Place: place, Activity: activity, Centroids: opts.Centroids,
+		Exclude: opts.Exclude, Rules: opts.Rules, Now: opts.Now,
+		Transitions: opts.Transitions, Negative: opts.Negative,
+	})
 
 	scored := make([]ScoredCandidate, 0, len(cands))
 	for _, cand := range cands {
@@ -109,21 +89,24 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 		if opts.Rules != nil {
 			downrank = opts.Rules.Downrank(meta.ID)
 		}
+		artistRepeat, albumRepeat, transitionScore := TransitionFeatures(
+			currentMeta, meta, float64(cand.Sims.Current), opts.Transitions[meta.ID], opts.Profile, opts.LearnedTransition,
+		)
 		values := VectorFromInputs(FeatureInputs{
 			Meta: meta, Now: opts.Now,
 			SimTaste: float64(cand.Sims.Taste), SimCurrent: float64(cand.Sims.Current),
 			SimSession: float64(cand.Sims.Session), SimDaypart: float64(cand.Sims.Daypart),
 			SimMood: ctxSims["mood"], SimPlace: ctxSims["place"], SimActivity: ctxSims["activity"],
-			SimCentroidMax: float64(cand.Sims.CentroidMax),
-			TransitionW:    normTransition(opts.Transitions[meta.ID], opts.Transitions),
-			Current:        currentMeta, Sources: cand.Sources,
+			SimCentroidMax:  float64(cand.Sims.CentroidMax),
+			TransitionW:     normTransition(opts.Transitions[meta.ID], opts.Transitions),
+			TransitionScore: transitionScore,
+			Current:         currentMeta,
 			NewBoost:        float64(b.Idx.NewBoost(cand.Row, opts.Now)),
 			NegativePenalty: neg,
+			ArtistRepeat:    artistRepeat,
+			AlbumRepeat:     albumRepeat,
 		})
 		score := model.Score(values) - 0.35*downrank
-		if opts.ClusterPenalty != nil && meta.ClusterID >= 0 {
-			score -= clusterPenaltyWeight * opts.ClusterPenalty(meta.ClusterID)
-		}
 		cand.Primary = primarySource(cand.Sources)
 		scored = append(scored, ScoredCandidate{
 			Candidate: cand, Score: score, Features: values, Downrank: downrank,
@@ -133,24 +116,39 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 	quotas := coreQuotas(opts)
 	selected := Select(scored, SelectOpts{
 		Size: opts.Size, Quotas: quotas,
-		MMRLambda: 0.7, ArtistLimit: 2, Idx: b.Idx, CurrentID: opts.CurrentID,
+		MMRLambda: ActiveSpec.MMRLambda, ArtistLimit: 2, Idx: b.Idx, CurrentID: opts.CurrentID,
 	})
-	seq := BeamSequence(b.Idx, opts.CurrentID, selected, opts.Size, 6, opts.Profile, opts.Transitions, 0.35)
+	seq := BeamSequence(b.Idx, opts.CurrentID, selected, opts.Size, 6, opts.Profile, opts.Transitions, 0.35, opts.LearnedTransition)
 	chosen := seq.Items
 	if len(chosen) == 0 {
 		chosen = Select(scored, SelectOpts{
-			Size: opts.Size, Quotas: quotas, MMRLambda: 0.7,
+			Size: opts.Size, Quotas: quotas, MMRLambda: ActiveSpec.MMRLambda,
 			ArtistLimit: 2, Idx: b.Idx, CurrentID: opts.CurrentID,
 		})
 	}
 
 	out := make([]Item, 0, len(chosen))
 	boostIdx := FeatureIndex("new_boost")
+	positionIdx := FeatureIndex("queue_position")
 	for i, c := range chosen {
 		meta := b.Idx.MetaAt(c.Row)
-		_, featuresJSON := Snapshot(model.ModelVersion, c.Features, FeatureContext{
+		logged := append([]float64(nil), c.Features...)
+		if positionIdx >= 0 && positionIdx < len(logged) {
+			logged[positionIdx] = float64(i)
+		}
+		ctx := FeatureContext{
 			Daypart: opts.DaypartName, ContextIDs: opts.ContextIDs, Profile: string(opts.Profile),
-		})
+			Position: i, DurationSec: meta.Duration,
+		}
+		if opts.Allocation != nil && opts.Allocation.SampledP > 0 {
+			ctx.SampledP = opts.Allocation.SampledP
+		}
+		if i < len(seq.Explain) {
+			if feats, ok := seq.Explain[i]["features"].(map[string]float64); ok {
+				ctx.Pairwise = copyFloatMap(feats)
+			}
+		}
+		_, featuresJSON := Snapshot(model.ModelVersion, logged, ctx)
 		why := c.Primary
 		if i < len(seq.Explain) {
 			why = c.Primary + " · sequence"
@@ -171,10 +169,18 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 	return out
 }
 
-func coreQuotas(opts CoreOpts) map[string]Quota {
-	if opts.Shifted {
-		return ShiftQuotas
+func copyFloatMap(in map[string]float64) map[string]float64 {
+	if len(in) == 0 {
+		return nil
 	}
+	out := make(map[string]float64, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
+}
+
+func coreQuotas(opts CoreOpts) map[string]Quota {
 	if opts.Allocation != nil && opts.Allocation.Quotas != nil {
 		return opts.Allocation.Quotas
 	}

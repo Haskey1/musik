@@ -3,7 +3,6 @@ package playback
 import (
 	"database/sql"
 	"errors"
-	"log"
 	"time"
 
 	"github.com/torwin-job/musik/player/internal/db"
@@ -169,6 +168,12 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 			}
 		}
 		if !lifecycle.LifecycleChanged {
+			if lifecycle.AlreadyClosed {
+				return EventResult{
+					OK: true, IsEnd: true, Ignored: true, IgnoreReason: "already_closed",
+					NextID: sess.Current,
+				}
+			}
 			nextID := e.Advance(sess)
 			return EventResult{
 				OK: true, IsEnd: true, Ignored: true, IgnoreReason: "already_closed",
@@ -176,31 +181,19 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 			}
 		}
 		signed, action := taste.WeightFromListen(listened, dur, reason)
-		// "another mood": the listener pressed the button, not just skipped a track
-		mood := ev.Type == "skip" && reason == "mood_shift"
-		cluster := -1
 		if row, ok := e.Idx.RowOf(ev.TrackID); ok {
 			vector := e.Idx.Vector(row)
-			cluster = e.Idx.MetaAt(row).ClusterID
-			switch {
-			case mood:
-				sess.TasteState.ResetMood(vector, cluster)
-				signed = 0
-			case outcome == "finished":
+			if outcome == "finished" {
 				if signed <= 0 {
 					signed = 1
 				}
-				scale := longTasteScale(source)
-				e.TasteState.UpdatePositiveScaled(vector, signed, e.Cfg.TasteAlpha, scale,
+				e.TasteState.UpdatePositive(vector, signed, e.Cfg.TasteAlpha,
 					db.DayPart(time.Now().Hour()), &sess.TasteState)
-				e.PersistTaste(vector, signed*scale, e.Cfg.TasteAlpha)
-				sess.TasteState.NoteListened(cluster, true)
-			case outcome == "early_skip":
+				e.PersistTaste(vector, signed, e.Cfg.TasteAlpha)
+			} else if outcome == "early_skip" {
 				e.TasteState.AddEarlySkip(&sess.TasteState, vector, 1-ratio)
-				sess.TasteState.NoteSkip(cluster)
 				signed = 0
-			default:
-				sess.TasteState.NoteListened(cluster, false)
+			} else {
 				signed = 0
 			}
 			_ = action
@@ -208,6 +201,7 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		if outcome == "early_skip" {
 			_ = e.Store.BumpRecStats(ev.TrackID, 0, 1, 0)
 			e.Idx.BumpSkipEarlyLocal(ev.TrackID)
+			e.noteClusterSkip(sess, ev.TrackID)
 		}
 		if outcome == "finished" {
 			_ = e.Store.BumpRecStats(ev.TrackID, 0, 0, 1)
@@ -227,15 +221,6 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		e.ExcludeTrack(sess, ev.TrackID)
 		if len(sess.DailyIDs) == 0 {
 			e.dropFromQueue(sess, ev.TrackID)
-		}
-		if outcome == "early_skip" || mood {
-			log.Printf("radio skip: track=%d outcome=%s mood=%t cluster=%d streak=%d mode=%s shifts_radio=%t",
-				ev.TrackID, outcome, mood, cluster, sess.TasteState.SkipStreak, sess.Mode, shiftsRadio(sess))
-		}
-		if shiftsRadio(sess) && (mood || (outcome == "early_skip" && sess.TasteState.ShiftsAway(cluster))) {
-			// the queue was built for the mood the listener has just rejected: rebuild
-			// it without the track they are leaving as the point of reference
-			e.RefreshQueue(sess, 0, "skip_shift")
 		}
 		nextID := e.Advance(sess)
 		return EventResult{
@@ -288,7 +273,9 @@ func (e *Engine) ApplyEvent(sess *Session, ev Event) EventResult {
 		}
 
 	case "undislike":
-		// «Снять дизлайк»: the dislike leaves the history, the counters and the taste.
+		// «Снять дизлайк»: an undislike event undoes the dislike in the history,
+		// the counters and the taste. listening_history is append-only, so the
+		// undo is recorded as a new event after the dislike.
 		undone, err := e.Store.RevertDislike(ev.TrackID)
 		if err != nil {
 			return EventResult{Error: err.Error()}

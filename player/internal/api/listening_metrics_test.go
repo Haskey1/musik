@@ -26,7 +26,7 @@ func TestListeningMetricsRoute(t *testing.T) {
 	cfg := config.Config{DBPath: path, QueueSize: 6, AuthDisabled: true}
 	handler := New(cfg, store, index.New(cfg), taste.New(), nil).Handler()
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/metrics/listening", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/metrics/listening/summary", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
@@ -41,4 +41,18 @@ func TestListeningMetricsRoute(t *testing.T) {
 	if body.Year != time.Now().UTC().Year() || body.Weekly.Plays != 0 || body.Yearly.Plays != 0 || body.Weekly.Tracks == nil || body.Yearly.Artists == nil {
 		t.Fatalf("unexpected response: %s", response.Body.String())
 	}
+	// The web client's existing memory response must keep its original shape.
+	memory := httptest.NewRecorder()
+	handler.ServeHTTP(memory, httptest.NewRequest(http.MethodGet, "/api/metrics/listening", nil))
+	var legacy db.ListeningMemory
+	if memory.Code != http.StatusOK {
+		t.Fatalf("web status=%d body=%s", memory.Code, memory.Body.String())
+	}
+	if err := json.Unmarshal(memory.Body.Bytes(), &legacy); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.Year.Year != time.Now().UTC().Year() || legacy.OnThisDay.Tracks == nil {
+		t.Fatalf("web listening contract changed: %s", memory.Body.String())
+	}
+
 }

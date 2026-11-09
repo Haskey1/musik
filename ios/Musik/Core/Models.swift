@@ -170,6 +170,7 @@ struct RecommendResponse: Decodable {
     var albums: [AlbumItem]?
     var empty: Bool?
     var hint: String?
+    var explanation: String?
 }
 
 struct DiscoverTip: Decodable, Identifiable, Hashable {

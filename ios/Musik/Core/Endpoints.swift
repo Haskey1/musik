@@ -54,7 +54,7 @@ extension APIClient {
     func profile() async throws -> Profile { try await get("/api/profile") }
 
     func listeningStatistics() async throws -> ListeningStatistics {
-        try await get("/api/metrics/listening")
+        try await get("/api/metrics/listening/summary")
     }
 
     func saveExploreBounds(lo: Double, hi: Double) async throws {

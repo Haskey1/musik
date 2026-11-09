@@ -16,6 +16,15 @@ func (s *Server) handleWeeklyMetrics(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, m)
 }
 
+func (s *Server) handleListeningMemory(w http.ResponseWriter, _ *http.Request) {
+	mem, err := s.Store.ListeningMemory(time.Now().UTC())
+	if err != nil {
+		writeErr(w, 500, "db", err.Error())
+		return
+	}
+	writeJSON(w, mem)
+}
+
 func (s *Server) handleRecommendationMetrics(w http.ResponseWriter, _ *http.Request) {
 	m, err := s.Store.OutcomeMetrics(90)
 	if err != nil {
@@ -46,21 +55,4 @@ func firstPolicy(rows []db.RecommendationPolicyRow) any {
 		return nil
 	}
 	return rows[0]
-}
-
-// Personal history rather than recommendation quality: manual plays count too.
-func (s *Server) handleListeningMetrics(w http.ResponseWriter, _ *http.Request) {
-	now := time.Now().UTC()
-	weekly, err := s.Store.ListeningPeriodStats(now.AddDate(0, 0, -7), now.Add(time.Second))
-	if err != nil {
-		writeErr(w, 500, "db", err.Error())
-		return
-	}
-	yearStart := time.Date(now.Year(), time.January, 1, 0, 0, 0, 0, time.UTC)
-	yearly, err := s.Store.ListeningPeriodStats(yearStart, now.Add(time.Second))
-	if err != nil {
-		writeErr(w, 500, "db", err.Error())
-		return
-	}
-	writeJSON(w, map[string]any{"year": now.Year(), "weekly": weekly, "yearly": yearly})
 }
