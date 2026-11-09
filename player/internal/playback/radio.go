@@ -48,6 +48,7 @@ type RadioStart struct {
 	Proximity string
 	Session   *Session
 	Station   string
+	Mood      string
 }
 
 // StationName is the player label: "радио от: …" while the anchor is held,
@@ -62,7 +63,40 @@ func (s *Session) StationName() string {
 	if s.Anchor.Kind != "" && s.Anchor.Proximity != ProximityWide && s.Anchor.Label != "" {
 		return "радио от: " + s.Anchor.Label
 	}
+	if label := moodPresetLabel(s.MoodPreset); label != "" {
+		return "радио · " + label
+	}
 	return "радио"
+}
+
+func normalizeMoodPreset(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "energy", "energetic", "бодрое":
+		return "energy"
+	case "calm", "спокойное":
+		return "calm"
+	case "happy", "весёлое", "веселое":
+		return "happy"
+	case "sad", "грустное":
+		return "sad"
+	default:
+		return ""
+	}
+}
+
+func moodPresetLabel(value string) string {
+	switch value {
+	case "energy":
+		return "Бодрое"
+	case "calm":
+		return "Спокойное"
+	case "happy":
+		return "Весёлое"
+	case "sad":
+		return "Грустное"
+	default:
+		return ""
+	}
 }
 
 func (e *Engine) attachAnchor(sess *Session, seed *int64, opt RadioStart) {

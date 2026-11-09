@@ -107,8 +107,19 @@ final class PlayerController: ObservableObject {
             if let mood {
                 let context = try await self.api.moodContext(named: mood)
                 body["context_ids"] = [context.contextId]
+                body["mood"] = Self.moodPresetKey(mood)
             }
             return try await self.api.post("/api/radio/start", body)
+        }
+    }
+
+    private static func moodPresetKey(_ mood: String) -> String {
+        switch mood.lowercased() {
+        case "бодрое": return "energy"
+        case "спокойное": return "calm"
+        case "весёлое", "веселое": return "happy"
+        case "грустное": return "sad"
+        default: return mood.lowercased()
         }
     }
 

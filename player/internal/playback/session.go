@@ -34,6 +34,7 @@ type Session struct {
 	TasteState        taste.SessionState
 	ActiveContextIDs  []string
 	TransitionProfile string
+	MoodPreset        string
 	Anchor            RadioAnchor
 	Chapter           TasteChapter
 	// ephemeral sessions belong to one share listener. They stay in memory
@@ -97,8 +98,9 @@ func (e *Engine) Get(id string) *Session {
 // so a restarted session still holds the station. Older rows have no anchor.
 type persistedSessionTaste struct {
 	taste.SessionState
-	Anchor  RadioAnchor  `json:"radio_anchor,omitempty"`
-	Chapter TasteChapter `json:"taste_chapter,omitempty"`
+	Anchor     RadioAnchor  `json:"radio_anchor,omitempty"`
+	Chapter    TasteChapter `json:"taste_chapter,omitempty"`
+	MoodPreset string       `json:"mood_preset,omitempty"`
 }
 
 func hydrate(row db.PlaySessionRow) *Session {
@@ -128,6 +130,7 @@ func hydrate(row db.PlaySessionRow) *Session {
 			sess.TasteState = stored.SessionState
 			sess.Anchor = stored.Anchor
 			sess.Chapter = stored.Chapter
+			sess.MoodPreset = stored.MoodPreset
 		}
 	}
 	if row.ExcludeJSON != "" {
@@ -177,11 +180,14 @@ func (e *Engine) persistLocked(sess *Session) {
 	profile := sess.TransitionProfile
 	anchor := sess.Anchor
 	chapter := sess.Chapter
+	moodPreset := sess.MoodPreset
 	updatedAt := time.Now().UTC().Format(time.RFC3339Nano)
 	e.enqueue(func() {
 		qj, _ := json.Marshal(queueItems)
 		cij, _ := json.Marshal(currentItem)
-		tsj, _ := json.Marshal(persistedSessionTaste{SessionState: tasteState, Anchor: anchor, Chapter: chapter})
+		tsj, _ := json.Marshal(persistedSessionTaste{
+			SessionState: tasteState, Anchor: anchor, Chapter: chapter, MoodPreset: moodPreset,
+		})
 		ej, _ := json.Marshal(exclude)
 		rj, _ := json.Marshal(rated)
 		dj, _ := json.Marshal(dailyIDs)

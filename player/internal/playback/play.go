@@ -278,6 +278,7 @@ func (e *Engine) Start(mode string, seed *int64, contextIDs []string, radio ...R
 	sess.Lock()
 	defer sess.Unlock()
 	if mode == "radio" {
+		sess.MoodPreset = normalizeMoodPreset(opt.Mood)
 		if len(contextIDs) > 0 {
 			_ = e.SetSessionContexts(sess, contextIDs)
 		}

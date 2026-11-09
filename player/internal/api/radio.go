@@ -20,6 +20,7 @@ func (s *Server) handleRadioStart(w http.ResponseWriter, r *http.Request) {
 		Proximity   string   `json:"proximity"`
 		SessionID   string   `json:"session_id"`
 		Station     string   `json:"station"`
+		Mood        string   `json:"mood"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
@@ -35,7 +36,7 @@ func (s *Server) handleRadioStart(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := s.Play.Start("radio", req.SeedTrackID, req.ContextIDs, playback.RadioStart{
 		Artist: req.SeedArtist, Album: req.SeedAlbum, Proximity: req.Proximity, Session: tune,
-		Station: req.Station,
+		Station: req.Station, Mood: req.Mood,
 	})
 	sess.Lock()
 	defer sess.Unlock()

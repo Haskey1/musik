@@ -63,7 +63,7 @@ func (e *Engine) PickStart(sess *Session, seed *int64) int64 {
 	var startID int64
 	if seed != nil {
 		startID = *seed
-	} else if e.Discovering() {
+	} else if e.Discovering() && sess.MoodPreset == "" {
 		startID = e.Builder.PickRandom(sess.Exclude)
 	} else {
 		startID = e.pickTasteStart(sess)
@@ -118,21 +118,25 @@ func (e *Engine) pickTasteStart(sess *Session) int64 {
 		row int
 		sim float32
 	}
-	if e.Builder.RandomFloat64() < 0.12 && n > 8 {
+	if sess.MoodPreset == "" && e.Builder.RandomFloat64() < 0.12 && n > 8 {
 		if id := e.Builder.PickRandom(recent); id != 0 {
 			return id
 		}
 	}
 
 	k := 20
+	if sess.MoodPreset != "" {
+		k = 80
+	}
 	top := e.Idx.TopK(e.tasteForQueue(sess), k, nil)
 	if len(top) == 0 {
 		return e.Builder.PickRandom(recent)
 	}
 	candidates := make([]pair, 0, len(top))
 	for _, p := range top {
-		id := e.Idx.MetaAt(p.Row).ID
-		sim := p.Score
+		meta := e.Idx.MetaAt(p.Row)
+		id := meta.ID
+		sim := p.Score + float32(0.75*queue.MoodPresetScore(meta, sess.MoodPreset))
 		if recent[id] {
 			sim -= 0.35
 		}
@@ -148,7 +152,9 @@ func (e *Engine) pickTasteStart(sess *Session) int64 {
 	if allRecent {
 		candidates = candidates[:0]
 		for _, p := range top {
-			candidates = append(candidates, pair{p.Row, p.Score})
+			meta := e.Idx.MetaAt(p.Row)
+			sim := p.Score + float32(0.75*queue.MoodPresetScore(meta, sess.MoodPreset))
+			candidates = append(candidates, pair{p.Row, sim})
 		}
 	}
 
@@ -336,6 +342,7 @@ func (e *Engine) RefreshQueue(sess *Session, currentID int64, reason string) {
 		},
 		DaypartName: dp, ContextIDs: sess.ActiveContextIDs,
 		Discover: e.Discovering(), Allocation: &decision,
+		MoodPreset: sess.MoodPreset,
 		LearnedTransition: e.learnedTransition(),
 	})
 	if reason != "" && sess.Mode != "share" {

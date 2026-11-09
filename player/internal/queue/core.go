@@ -2,6 +2,7 @@ package queue
 
 import (
 	"math"
+	"strings"
 	"time"
 
 	"github.com/torwin-job/musik/player/internal/index"
@@ -30,6 +31,7 @@ type CoreOpts struct {
 	Discover          bool
 	Allocation        *ExploreDecision
 	LearnedTransition *TransitionModel
+	MoodPreset        string
 }
 
 func (b *Builder) BuildCore(opts CoreOpts) []Item {
@@ -107,6 +109,7 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 			AlbumRepeat:     albumRepeat,
 		})
 		score := model.Score(values) - 0.35*downrank
+		score += 0.75 * MoodPresetScore(meta, opts.MoodPreset)
 		cand.Primary = primarySource(cand.Sources)
 		scored = append(scored, ScoredCandidate{
 			Candidate: cand, Score: score, Features: values, Downrank: downrank,
@@ -138,7 +141,7 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 		}
 		ctx := FeatureContext{
 			Daypart: opts.DaypartName, ContextIDs: opts.ContextIDs, Profile: string(opts.Profile),
-			Position: i, DurationSec: meta.Duration,
+			Position: i, DurationSec: meta.Duration, MoodPreset: opts.MoodPreset,
 		}
 		if opts.Allocation != nil && opts.Allocation.SampledP > 0 {
 			ctx.SampledP = opts.Allocation.SampledP
@@ -167,6 +170,65 @@ func (b *Builder) BuildCore(opts CoreOpts) []Item {
 		})
 	}
 	return out
+}
+
+// MoodPresetScore is an immediate, metadata-based mood signal. Unlike a taste
+// context it works before the listener has rated anything in that context.
+// The learned context still participates in the normal similarity features.
+func MoodPresetScore(meta index.Meta, preset string) float64 {
+	var energy float64
+	parts := 0.0
+	if meta.HasBPM && meta.BPM > 0 {
+		energy += math.Max(-1, math.Min(1, (meta.BPM-105)/45))
+		parts++
+	}
+	if meta.HasLUFS {
+		energy += math.Max(-1, math.Min(1, (meta.LUFS+16)/6))
+		parts++
+	}
+	if parts > 0 {
+		energy /= parts
+	}
+
+	mode := 0.0
+	key := strings.ToLower(strings.TrimSpace(meta.KeyName))
+	switch {
+	case strings.Contains(key, "major"), strings.Contains(key, "maj"):
+		mode = 1
+	case strings.Contains(key, "minor"), strings.Contains(key, "min"):
+		mode = -1
+	case isCamelotMode(key, 'b'):
+		mode = 1
+	case isCamelotMode(key, 'a'):
+		mode = -1
+	}
+
+	switch strings.ToLower(strings.TrimSpace(preset)) {
+	case "energy":
+		return energy
+	case "calm":
+		return -energy
+	case "happy":
+		return 0.65*energy + 0.35*mode
+	case "sad":
+		return -0.55*energy - 0.45*mode
+	default:
+		return 0
+	}
+}
+
+func isCamelotMode(key string, suffix byte) bool {
+	if len(key) < 2 || key[len(key)-1] != suffix {
+		return false
+	}
+	n := 0
+	for i := 0; i < len(key)-1; i++ {
+		if key[i] < '0' || key[i] > '9' {
+			return false
+		}
+		n = n*10 + int(key[i]-'0')
+	}
+	return n >= 1 && n <= 12
 }
 
 func copyFloatMap(in map[string]float64) map[string]float64 {

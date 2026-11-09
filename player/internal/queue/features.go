@@ -26,6 +26,7 @@ type FeatureContext struct {
 	Daypart     string             `json:"daypart,omitempty"`
 	ContextIDs  []string           `json:"context_ids,omitempty"`
 	Profile     string             `json:"profile,omitempty"`
+	MoodPreset  string             `json:"mood_preset,omitempty"`
 	Position    int                `json:"position"`
 	DurationSec float64            `json:"duration_sec,omitempty"`
 	SampledP    float64            `json:"sampled_p,omitempty"`
