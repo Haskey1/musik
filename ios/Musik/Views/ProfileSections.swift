@@ -8,6 +8,7 @@ struct ProfileSectionView: View {
     var body: some View {
         switch section {
         case .taste: TasteSection()
+        case .statistics: ListeningStatisticsSection()
         case .playback: PlaybackSection()
         case .storage: StorageSection()
         case .hidden: HiddenSection()
@@ -32,43 +33,114 @@ private struct TasteSection: View {
     @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
     @State private var profile: Profile?
+    @State private var exploreLo = 0.1
+    @State private var exploreHi = 0.4
+    @State private var saving = false
+    @State private var loadError: String?
 
     var body: some View {
         List {
             Section {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(Labels.maturity(profile?.maturity ?? player.maturity)).font(.headline)
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(Labels.maturity(profile?.maturity ?? player.maturity)).font(.title3.bold())
+                    Text(profile?.maturity == "ready"
+                         ? "Дальше радио опирается на лайки и то, что ты дослушиваешь."
+                         : "Слушай и отмечай любимое — так радио запоминает твой вкус.")
+                        .font(.subheadline).foregroundStyle(Theme.muted)
                     if let p = profile {
                         ProgressView(value: min(1, max(0, p.confidence ?? 0))).tint(Theme.accent)
-                        Text("\(p.nPositive ?? 0) положительных сигналов из \(p.readyAt ?? 8) · \(p.nNegative ?? 0) скипов/дизлайков")
-                            .font(.caption)
-                            .foregroundStyle(Theme.muted)
-                        if let explore = p.exploreRatio {
-                            Text("Доля исследования: \(Int((explore * 100).rounded()))%")
-                                .font(.caption)
-                                .foregroundStyle(Theme.muted)
-                        }
+                        metric("\(p.nPositive ?? 0)", label: "лайков")
+                        metric("\(p.nNegative ?? 0)", label: "скипов")
+                        metric(percent(p.exploreRatio ?? 0), label: "нового сейчас")
+                    } else if let loadError {
+                        Text(loadError).font(.caption).foregroundStyle(Theme.muted)
+                        Button("Попробовать снова") { Task { await load() } }
+                    } else {
+                        ProgressView()
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 6)
+            }
+            if profile != nil {
+                Section {
+                    Text("Знакомое — похожее на лайки. Новое — соседнее, забытое и случайное.")
+                        .font(.subheadline).foregroundStyle(Theme.muted)
+                    bound("не меньше", value: $exploreLo, range: 0...0.6)
+                        .onChange(of: exploreLo) { value in
+                            if value >= exploreHi { exploreHi = min(0.8, value + 0.05) }
+                        }
+                    bound("не больше", value: $exploreHi, range: 0.1...0.8)
+                        .onChange(of: exploreHi) { value in
+                            if value <= exploreLo { exploreLo = max(0, value - 0.05) }
+                        }
+                    Text("Нового будет от \(percent(exploreLo)) до \(percent(exploreHi))")
+                        .font(.caption).foregroundStyle(Theme.muted)
+                    Button(saving ? "Сохраняю…" : "Сохранить") {
+                        saving = true
+                        app.perform {
+                            defer { saving = false }
+                            try await app.api.saveExploreBounds(lo: exploreLo, hi: exploreHi)
+                            await load()
+                            app.show("Настройки радио сохранены")
+                        }
+                    }
+                    .disabled(saving)
+                } header: { Text("Сколько нового в радио") }
             }
             if let top = profile?.topArtists, !top.isEmpty {
-                Section("Чаще всего слушаешь") {
+                Section("Часто играет") {
                     ForEach(top, id: \.artist) { a in
-                        NavigationLink(value: Route.artist(a.artist)) {
-                            HStack {
-                                Text(a.artist)
-                                Spacer()
-                                Text("\(a.count)").foregroundStyle(Theme.muted).monospacedDigit()
-                            }
-                        }
+                        NavigationLink(value: Route.artist(a.artist)) { Text(a.artist) }
                     }
                 }
             }
+            Section {
+                NavigationLink(value: Route.profile(.statistics)) {
+                    Label("За неделю и год", systemImage: "chart.bar.fill")
+                }
+            } header: { Text("Статистика прослушиваний") }
         }
-        .profileScreen("Вкус")
-        .refreshable { profile = (try? await app.api.profile()) ?? profile }
-        .task { profile = (try? await app.api.profile()) ?? profile }
+        .profileScreen("Радио")
+        .refreshable { await load() }
+        .task { await load() }
+    }
+
+    private func metric(_ value: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value).font(.display(28)).monospacedDigit()
+            Text(label).font(.caption).foregroundStyle(Theme.muted)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14)
+        .background(Theme.background.opacity(0.45), in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.white.opacity(0.08)))
+    }
+
+    private func bound(_ title: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title)
+                Spacer()
+                Text(percent(value.wrappedValue)).monospacedDigit()
+            }
+            .font(.subheadline)
+            Slider(value: value, in: range, step: 0.05).tint(Theme.accent)
+                .accessibilityLabel(title == "не меньше" ? "Минимум нового в радио" : "Максимум нового в радио")
+        }
+    }
+
+    private func percent(_ value: Double) -> String { "\(Int((value * 100).rounded()))%" }
+
+    private func load() async {
+        do {
+            let p = try await app.api.profile()
+            profile = p
+            exploreLo = min(0.6, max(0, p.exploreLo ?? 0.1))
+            exploreHi = min(0.8, max(exploreLo + 0.05, p.exploreHi ?? 0.4))
+            loadError = nil
+        } catch {
+            loadError = "Не удалось загрузить профиль. \(error.localizedDescription)"
+        }
     }
 }
 
@@ -202,7 +274,7 @@ private struct HiddenSection: View {
                     }
                 }
             } footer: {
-                Text("Скрыть трек или артиста — в меню трека или «⋯» в плеере. После трёх быстрых скипов подряд артист сам попадает в «реже».")
+                Text("Скрыть трек или артиста — в меню трека или «⋯» в плеере.")
             }
         }
         .profileScreen("Скрыто и реже")
@@ -227,7 +299,6 @@ private struct HiddenSection: View {
 
     private func unhide(_ rule: RadioRule) async throws {
         try await app.api.deleteRule(rule.ruleId)
-        if rule.targetType == "artist" { ArtistSkips.reset(rule.targetKey) }
         rules.removeAll { $0.id == rule.id }
         app.show("Вернул")
     }

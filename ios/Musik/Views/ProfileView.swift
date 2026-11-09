@@ -3,7 +3,7 @@ import SwiftUI
 /// The sub-screens of the profile. The tab itself is only a short menu; every group of
 /// settings lives on its own screen (see ProfileSections.swift).
 enum ProfileSection: String, Hashable {
-    case taste, playback, storage, hidden, share, server
+    case taste, statistics, playback, storage, hidden, share, server
 }
 
 struct ProfileView: View {
@@ -17,6 +17,8 @@ struct ProfileView: View {
         List {
             Section {
                 NavigationLink(value: Route.profile(.taste)) { tasteSummary }
+                row(.statistics, "Статистика", "chart.bar.fill", .teal,
+                    subtitle: "За неделю и год · треки и артисты")
             }
 
             Section {
@@ -48,7 +50,7 @@ struct ProfileView: View {
 
     private var tasteSummary: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Вкус").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+            Text("Радио").font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
             Text(Labels.maturity(profile?.maturity ?? player.maturity)).font(.headline)
             if let p = profile {
                 ProgressView(value: min(1, max(0, p.confidence ?? 0))).tint(Theme.accent)

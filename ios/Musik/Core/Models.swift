@@ -216,6 +216,8 @@ struct Profile: Decodable {
     var formingAt: Int?
     var confidence: Double?
     var exploreRatio: Double?
+    var exploreLo: Double?
+    var exploreHi: Double?
     var topArtists: [ArtistCount]?
 }
 
@@ -301,4 +303,34 @@ extension Optional where Wrapped == String {
         guard let s = self?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return nil }
         return s
     }
+}
+
+struct TasteContext: Decodable {
+    var contextId: String
+    var kind: String
+    var name: String
+}
+
+struct ContextsResponse: Decodable { var contexts: [TasteContext] }
+
+struct ListeningStatistics: Decodable {
+    var year: Int
+    var weekly: ListeningPeriod
+    var yearly: ListeningPeriod
+}
+
+struct ListeningPeriod: Decodable {
+    var listenedSeconds: Double
+    var plays: Int
+    var finishRate: Double
+    var tracks: [ListeningTrack]
+    var artists: [ArtistCount]
+}
+
+struct ListeningTrack: Decodable, Identifiable {
+    var trackId: Int
+    var title: String
+    var artist: String
+    var count: Int
+    var id: Int { trackId }
 }

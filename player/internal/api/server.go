@@ -129,6 +129,7 @@ var apiRoutes = []routeDescriptor{
 	{"POST", "/api/jobs/{kind}", (*Server).handleEnqueueJob},
 	{"GET", "/api/jobs/{id}", (*Server).handleGetJob},
 	{"GET", "/api/jobs", (*Server).handleListJobs},
+	{"GET", "/api/metrics/listening", (*Server).handleListeningMetrics},
 	{"GET", "/api/metrics/weekly", (*Server).handleWeeklyMetrics},
 	{"GET", "/api/metrics/recommendations", (*Server).handleRecommendationMetrics},
 	{"GET", "/api/contexts", (*Server).handleContextsList},

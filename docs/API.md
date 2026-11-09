@@ -230,3 +230,13 @@ Public share-radio не пишет owner events, transitions, taste или ме�
 Для абсолютных URL с LAN задай `MUSIK_PUBLIC_BASE_URL`.
 
 Env: `MUSIK_PASSWORD`, `MUSIK_API_TOKEN`, `MUSIK_SESSION_SECRET`, `MUSIK_AUTH_DISABLED`, `MUSIK_SECURE_COOKIE`, `MUSIK_PUBLIC_BASE_URL`, `MUSIK_FFMPEG`, `MUSIK_SHARE_BITRATE`, `MUSIK_SHARE_MAX_LISTENERS`, `MUSIK_PROFILE_*`, `MUSIK_WORKER_URL`.
+
+### Personal listening statistics
+
+`GET /api/metrics/listening` returns `{year, weekly, yearly}` for the active
+profile. Weekly covers the last seven days; yearly starts January 1 UTC. Each
+period contains `listened_seconds`, `plays`, `finish_rate` (0–1), five top
+`tracks` (`track_id`, `title`, `artist`, `count`) and eight top `artists`
+(`artist`, `count`). Manual and radio playback count; share listening does not.
+Cumulative progress and the final event count once per play. Legacy history is
+split on `track_start`. Empty history returns zero totals and empty lists.

@@ -420,6 +420,158 @@
     }
   ],
   "paths": {
+    "/api/metrics/listening": {
+      "get": {
+        "summary": "Personal listening totals for the last seven days and current UTC calendar year",
+        "tags": [
+          "metrics"
+        ],
+        "responses": {
+          "200": {
+            "description": "Actual listening history, including manual playback. Cumulative progress is counted once per play.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "year",
+                    "weekly",
+                    "yearly"
+                  ],
+                  "properties": {
+                    "year": {
+                      "type": "integer"
+                    },
+                    "weekly": {
+                      "type": "object",
+                      "required": [
+                        "listened_seconds",
+                        "plays",
+                        "finish_rate",
+                        "tracks",
+                        "artists"
+                      ],
+                      "properties": {
+                        "listened_seconds": {
+                          "type": "number"
+                        },
+                        "plays": {
+                          "type": "integer"
+                        },
+                        "finish_rate": {
+                          "type": "number"
+                        },
+                        "tracks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "track_id",
+                              "title",
+                              "artist",
+                              "count"
+                            ],
+                            "properties": {
+                              "track_id": {
+                                "type": "integer"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "artist": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        "artists": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artist": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "yearly": {
+                      "type": "object",
+                      "required": [
+                        "listened_seconds",
+                        "plays",
+                        "finish_rate",
+                        "tracks",
+                        "artists"
+                      ],
+                      "properties": {
+                        "listened_seconds": {
+                          "type": "number"
+                        },
+                        "plays": {
+                          "type": "integer"
+                        },
+                        "finish_rate": {
+                          "type": "number"
+                        },
+                        "tracks": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "track_id",
+                              "title",
+                              "artist",
+                              "count"
+                            ],
+                            "properties": {
+                              "track_id": {
+                                "type": "integer"
+                              },
+                              "title": {
+                                "type": "string"
+                              },
+                              "artist": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        },
+                        "artists": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artist": {
+                                "type": "string"
+                              },
+                              "count": {
+                                "type": "integer"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "security": [],

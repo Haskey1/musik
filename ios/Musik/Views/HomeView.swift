@@ -69,7 +69,7 @@ struct HomeView: View {
                 .accessibilityLabel("Поиск")
                 .padding(.top, 4)
             }
-            RadioCard()
+            RadioCard(refreshingMixes: refreshingMixes, refreshMixes: { Task { await refreshMixes() } })
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
@@ -308,62 +308,154 @@ struct TipCard: View {
 }
 
 
-/// The radio on the home screen: a big warm card instead of a small button. Tapping it
-/// starts the radio, or pauses / resumes it when the radio is what is playing.
+/// A roomy radio hero with direct access to favorites and mood contexts.
 private struct RadioCard: View {
+    @EnvironmentObject var app: AppState
     @EnvironmentObject var player: PlayerController
+    let refreshingMixes: Bool
+    let refreshMixes: () -> Void
+    @State private var shareItem: ShareItem?
+    @State private var sharing = false
 
+    private let moods = ["Фокус", "Эпик", "Ночь", "Джаз", "Спокойно"]
     private var radioOn: Bool { player.current != nil && !player.fixed && !player.offlineMode }
 
     var body: some View {
-        Button {
-            Haptics.press()
-            if radioOn { player.togglePlay() } else { player.startRadio() }
-        } label: {
-            HStack(spacing: 16) {
-                ZStack {
-                    Circle().fill(Color.black.opacity(0.18))
-                    if radioOn && player.isPlaying {
-                        SoundBars()
-                    } else {
-                        Image(systemName: "dot.radiowaves.left.and.right")
-                            .font(.system(size: 26, weight: .bold))
-                    }
-                }
-                .frame(width: 60, height: 60)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("Радио").font(.display(28))
-                    MarqueeText(text: subtitle, font: .subheadline.weight(.medium))
-                        .opacity(0.85)
-                }
-                Spacer(minLength: 0)
-                Image(systemName: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(Theme.accent)
-                    .frame(width: 48, height: 48)
-                    .background(Color.white, in: Circle())
+        VStack(alignment: .leading, spacing: 20) {
+            Text("НАСТРОЙСЯ НА СВОЁ")
+                .font(.caption.weight(.bold)).tracking(2)
+                .foregroundStyle(Theme.accentBright)
+            HStack(alignment: .center, spacing: 12) {
+                Text("Твой день.\nТвоя музыка.")
+                    .font(.display(34)).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                record
             }
-            .foregroundStyle(Color.white)
-            .padding(.horizontal, 18)
-            .padding(.vertical, 18)
-            .frame(maxWidth: .infinity)
-            .background(
-                LinearGradient(colors: [Theme.accentBright, Theme.accent, Color(hex: 0x9C3F1E)],
-                               startPoint: .topLeading, endPoint: .bottomTrailing),
-                in: RoundedRectangle(cornerRadius: 24, style: .continuous)
-            )
-            .shadow(color: Theme.accent.opacity(0.35), radius: 16, y: 8)
+            Text("Любимые треки и новые открытия — в одном потоке. Просто нажми play.")
+                .font(.subheadline).foregroundStyle(Theme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+
+            VStack(spacing: 10) {
+                Button {
+                    Haptics.press()
+                    if radioOn { player.togglePlay() } else { player.startRadio() }
+                } label: {
+                    Label(radioOn && player.isPlaying ? "Пауза радио" : "Включить моё радио",
+                          systemImage: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
+                        .frame(maxWidth: .infinity, minHeight: 30)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                Button { player.playMix("favorites") } label: {
+                    Label("Вспомнить любимое", systemImage: "heart.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                        .background(Color.black.opacity(0.1), in: Capsule())
+                        .overlay(Capsule().stroke(Theme.accent.opacity(0.35)))
+                }
+                .buttonStyle(.plain)
+            }
+            .disabled(player.busy)
+
+            // Wrap on narrow screens and with larger accessibility text sizes.
+            MoodLayout {
+                ForEach(moods, id: \.self) { mood in
+                    Button(mood) { player.startRadio(mood: mood) }
+                        .buttonStyle(ChipButtonStyle())
+                        .disabled(player.busy)
+                        .accessibilityLabel("Включить радио: \(mood)")
+                }
+            }
+            if radioOn, let track = player.current {
+                MarqueeText(text: "\(track.displayArtist) · \(track.displayTitle)", font: .caption)
+                    .foregroundStyle(Theme.muted)
+            }
+            HStack(spacing: 20) {
+                Button {
+                    sharing = true
+                    app.perform {
+                        defer { sharing = false }
+                        if let raw = try await app.api.createShare().url, let url = URL(string: raw) {
+                            shareItem = ShareItem(url: url)
+                        }
+                    }
+                } label: {
+                    Label(sharing ? "Создаю…" : "Поделиться", systemImage: "square.and.arrow.up")
+                }
+                .disabled(sharing)
+                Button(action: refreshMixes) {
+                    Label(refreshingMixes ? "Собираю…" : "Обновить миксы", systemImage: "arrow.clockwise")
+                }
+                .disabled(refreshingMixes)
+            }
+            .font(.caption.weight(.semibold)).foregroundStyle(Theme.muted)
+            .buttonStyle(.plain)
         }
-        .buttonStyle(PressScaleStyle())
-        .accessibilityLabel(radioOn && player.isPlaying ? "Пауза радио" : "Включить радио")
+        .padding(22)
+        .background(
+            LinearGradient(colors: [Theme.surfaceHigh, Theme.surface, Theme.accent.opacity(0.12)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing),
+            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 28).stroke(Theme.accent.opacity(0.12)))
+        .sheet(item: $shareItem) { item in
+            ActivityView(items: [item.url]).presentationDetents([.medium, .large])
+        }
     }
 
-    private var subtitle: String {
-        if radioOn, let t = player.current {
-            return [t.displayTitle, t.artist.nonEmpty].compactMap { $0 }.joined(separator: " · ")
+    private var record: some View {
+        ZStack {
+            Circle().fill(Theme.accent)
+            ForEach(0..<3) { i in
+                Circle().stroke(Color.black.opacity(0.12), lineWidth: 2)
+                    .padding(CGFloat(8 + i * 9))
+            }
+            Circle().fill(Theme.background).padding(31)
+            if radioOn && player.isPlaying {
+                SoundBars().foregroundStyle(Theme.accentBright)
+            } else {
+                Image(systemName: "music.note").font(.title2.bold()).foregroundStyle(Theme.accentBright)
+            }
         }
-        return "Музыка под твой вкус"
+        .frame(width: 104, height: 104)
+        .rotationEffect(.degrees(-15))
+        .accessibilityHidden(true)
+    }
+}
+
+/// Small wrapping rows for mood buttons and artist chips (iOS 16).
+struct MoodLayout: Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(subviews, width: proposal.width ?? 320).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let result = arrange(subviews, width: bounds.width)
+        for (index, point) in result.points.enumerated() {
+            subviews[index].place(at: CGPoint(x: bounds.minX + point.x, y: bounds.minY + point.y),
+                                  anchor: .topLeading,
+                                  proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> (size: CGSize, points: [CGPoint]) {
+        var points: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            if x > 0 && x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            points.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return (CGSize(width: width, height: y + rowHeight), points)
     }
 }
 

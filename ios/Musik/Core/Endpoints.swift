@@ -53,6 +53,25 @@ extension APIClient {
 
     func profile() async throws -> Profile { try await get("/api/profile") }
 
+    func listeningStatistics() async throws -> ListeningStatistics {
+        try await get("/api/metrics/listening")
+    }
+
+    func saveExploreBounds(lo: Double, hi: Double) async throws {
+        _ = try await send("PUT", "/api/profile/explore", body: ["explore_lo": lo, "explore_hi": hi])
+    }
+
+    /// Reuse the same named mood contexts as the web client.
+    func moodContext(named name: String) async throws -> TasteContext {
+        let list: ContextsResponse = try await get("/api/contexts")
+        if let existing = list.contexts.first(where: {
+            $0.kind == "mood" && $0.name.caseInsensitiveCompare(name) == .orderedSame
+        }) { return existing }
+        return try await post("/api/contexts", [
+            "name": name, "kind": "mood", "influence": 1, "learning_enabled": true,
+        ])
+    }
+
     // Catalog
     func library(artist: String? = nil, album: String? = nil, limit: Int? = nil) async throws -> [Track] {
         var q: [URLQueryItem] = []
