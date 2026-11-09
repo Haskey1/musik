@@ -1,31 +1,68 @@
 import SwiftUI
 import UIKit
 
-/// Player background in the colour of the current cover, like Yandex Music: the cover's
-/// main hue, toned to a mid brightness so white text stays readable; grey for covers
-/// with no real colour. Changes with a soft cross-fade when the track changes.
+/// The current cover becomes ambient light behind the player. Its dominant hue
+/// supplies the glow, while a heavily blurred copy gives the background depth.
+/// A fixed dark veil keeps controls readable regardless of the artwork.
 struct CoverBackdrop: View {
     let trackId: Int?
     @State private var color: UIColor?
+    @State private var image: UIImage?
 
     var body: some View {
         ZStack {
             Theme.backdrop
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFill()
+                    .blur(radius: 72)
+                    .scaleEffect(1.35)
+                    .opacity(0.42)
+                    .transition(.opacity)
+            }
             if let color {
-                LinearGradient(
-                    colors: [Color(color), Color(color.withBrightness(factor: 0.55))],
-                    startPoint: .top, endPoint: .bottom
+                RadialGradient(
+                    colors: [Color(color).opacity(0.68), Color(color).opacity(0.12), .clear],
+                    center: .topLeading,
+                    startRadius: 10,
+                    endRadius: 620
                 )
                 .transition(.opacity)
             }
+            Color.black.opacity(0.46)
+            LinearGradient(
+                colors: [.clear, Theme.background.opacity(0.26), Theme.background.opacity(0.82)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 0.6), value: color)
+        .animation(.easeInOut(duration: 0.6), value: image)
         .task(id: trackId) {
-            guard let trackId else { color = nil; return }
-            let found = await CoverColor.color(for: trackId)
-            withAnimation(.easeInOut(duration: 0.6)) { color = found }
+            guard let trackId else {
+                color = nil
+                image = nil
+                return
+            }
+            async let foundColor = CoverColor.color(for: trackId)
+            async let foundImage = backdropImage(for: trackId)
+            let result = await (foundColor, foundImage)
+            withAnimation(.easeInOut(duration: 0.6)) {
+                color = result.0
+                image = result.1
+            }
         }
+    }
+
+    private func backdropImage(for trackId: Int) async -> UIImage? {
+        if await OfflineStore.shared.isSaved(trackId),
+           let local = await OfflineStore.savedArtwork(trackId, size: 256) {
+            return local
+        }
+        guard let url = ImageLoader.shared.api?.artworkURL(trackId: trackId, width: 256) else { return nil }
+        return await ImageLoader.shared.image(url)
     }
 }
 
