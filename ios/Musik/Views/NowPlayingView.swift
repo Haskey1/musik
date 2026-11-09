@@ -25,16 +25,17 @@ struct NowPlayingView: View {
                 GeometryReader { geo in
                 ScrollViewReader { scroller in
                 ScrollView {
-                    VStack(spacing: 22) {
+                    VStack(spacing: 20) {
                         // The player proper is exactly one screen tall, and the cover takes
                         // whatever the controls leave: on a smaller phone the cover is smaller,
                         // but both rows of buttons are always in view. The queue / lyrics
                         // start below the fold.
-                        VStack(spacing: 22) {
+                        VStack(spacing: 18) {
                             topBar
-                            ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 22)
-                                .frame(maxWidth: 340, minHeight: Self.minCover, maxHeight: .infinity)
-                                .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
+                            ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
+                                .frame(maxWidth: 350, minHeight: Self.minCover, maxHeight: .infinity)
+                                .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.12)))
+                                .shadow(color: .black.opacity(0.5), radius: 32, y: 18)
                                 // shrinks only while the listener has paused; the short pause
                                 // between tracks (waiting for the server) must not make it breathe
                                 .scaleEffect(coverActive ? 1 : 0.94)
@@ -66,7 +67,7 @@ struct NowPlayingView: View {
                             }
                         }
                         .id("pane")
-                        // quiet, at the very bottom — as in Yandex Music
+                        // Quiet, at the very bottom of the player.
                         HStack {
                             Spacer()
                             Button { showEqualizer = true } label: {
@@ -184,20 +185,22 @@ struct NowPlayingView: View {
     }
 
     private func titleBlock(_ track: Track) -> some View {
-        VStack(spacing: 6) {
-            // always two lines tall: a one-line title must not change the cover's size
-            Text("M\nM")
-                .font(.title2.weight(.bold))
-                .hidden()
-                .frame(maxWidth: .infinity)  // the real title gets the full width, not one letter's
-                .overlay {
-                    Text(track.displayTitle)
-                        .font(.title2.weight(.bold))
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                        .minimumScaleFactor(0.85)
-                }
-            // artist and album open their pages
+        VStack(alignment: .leading, spacing: 7) {
+            if let source = Labels.source(track.source) {
+                Label(source, systemImage: "waveform")
+                    .font(.caption.weight(.semibold))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Theme.accent, in: Capsule())
+                    .foregroundStyle(Color.black.opacity(0.82))
+            }
+
+            Text(track.displayTitle)
+                .font(.display(30))
+                .multilineTextAlignment(.leading)
+                .lineLimit(2)
+                .minimumScaleFactor(0.78)
+
             HStack(spacing: 6) {
                 if let artist = track.artist.nonEmpty {
                     Button { app.pendingRoute = .artist(artist) } label: {
@@ -215,19 +218,13 @@ struct NowPlayingView: View {
             }
             .buttonStyle(.plain)
             .font(.subheadline)
-            .foregroundStyle(Color.white.opacity(0.7))
+            .foregroundStyle(Color.white.opacity(0.72))
             .lineLimit(1)
-            .padding(.horizontal, 8)
             .frame(minHeight: 20)
             TrackInfoLine(trackId: track.id)
-            // the badge's place is kept when there is none
-            Text(Labels.source(track.source) ?? " ")
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 8).padding(.vertical, 3)
-                .background(Color.white.opacity(Labels.source(track.source) == nil ? 0 : 0.15), in: Capsule())
-                .foregroundStyle(Color.white.opacity(0.8))
         }
         .padding(.horizontal, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
 
@@ -245,15 +242,15 @@ struct NowPlayingView: View {
             } label: {
                 ZStack {
                     Circle()
-                        .fill(Color.white)
+                        .fill(Theme.accent)
                         .frame(width: 76, height: 76)
-                        .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                        .shadow(color: Theme.accent.opacity(0.32), radius: 18, y: 8)
                     if player.isBuffering || player.busy {
-                        ProgressView().tint(.black)
+                        ProgressView().tint(.white)
                     } else {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
                             .font(.system(size: 30, weight: .bold))
-                            .foregroundStyle(.black.opacity(0.85))
+                            .foregroundStyle(.white)
                     }
                 }
             }
@@ -265,7 +262,7 @@ struct NowPlayingView: View {
             }
             .disabled(player.busy)
         }
-        .foregroundStyle(.primary)
+        .foregroundStyle(.white)
     }
 
     /// Two rows under the transport: rate / save, then explore.
@@ -402,9 +399,9 @@ private struct SeekBar: View {
                 let x = CGFloat(value / total) * width
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.white.opacity(0.25)).frame(height: scrubbing ? 8 : 5)
-                    Capsule().fill(Color.white).frame(width: max(x, 0), height: scrubbing ? 8 : 5)
+                    Capsule().fill(Theme.accentBright).frame(width: max(x, 0), height: scrubbing ? 8 : 5)
                     Circle()
-                        .fill(Color.white)
+                        .fill(Color(hex: 0xFFF4EC))
                         .frame(width: scrubbing ? 22 : 14, height: scrubbing ? 22 : 14)
                         .shadow(color: .black.opacity(0.3), radius: 3)
                         .offset(x: min(max(x - (scrubbing ? 11 : 7), -4), width - 10))
@@ -599,8 +596,8 @@ private struct LikeChip: View {
     }
 }
 
-/// Chips over the cover-coloured background: frosted white instead of the app's dark
-/// surface and orange, so they read on any cover colour.
+/// Dark glass chips remain readable over every cover-derived background while
+/// keeping the orange brand colour for active state and transport controls.
 struct GlassChipStyle: ButtonStyle {
     var active = false
     func makeBody(configuration: Configuration) -> some View {
@@ -608,9 +605,9 @@ struct GlassChipStyle: ButtonStyle {
             .font(.subheadline.weight(.semibold))
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(Color.white.opacity(active ? 0.3 : 0.12), in: Capsule())
-            .overlay(Capsule().stroke(Color.white.opacity(active ? 0.55 : 0.14)))
-            .foregroundStyle(Color.white)
+            .background(active ? Theme.accent.opacity(0.42) : Color.black.opacity(0.24), in: Capsule())
+            .overlay(Capsule().stroke(active ? Theme.accentBright.opacity(0.72) : Color.white.opacity(0.16)))
+            .foregroundStyle(active ? Theme.accentBright : Color.white)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
