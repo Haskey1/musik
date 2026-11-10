@@ -16,24 +16,34 @@ struct NowPlayingView: View {
     @State private var showEqualizer = false
     /// A sideways swipe on the cover is in progress: no scrolling, no closing meanwhile.
     @State private var swiping = false
-    @ObservedObject private var eq = Equalizer.shared
 
     var body: some View {
         ZStack {
             CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
                 GeometryReader { geo in
-                let compact = geo.size.height < 650
-                let spacing = min(14, max(8, (geo.size.height - 560) / 18))
-                let coverSide = max(140, min(geo.size.width - 48, 360, geo.size.height - 390))
+                let compact = geo.size.height < 700
+                let spacing: CGFloat = compact ? 8 : 10
+                // Reserve all controls before sizing the cover. Short viewports scroll.
+                let coverSide = max(140, min(geo.size.width * 0.76, 360,
+                                             geo.size.height - (compact ? 488 : 500)))
                 ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 20) {
-                        // A finite viewport lets spacers share spare height; exceptionally
-                        // short screens scroll the complete player rather than clipping it.
+                        // The complete player fits the viewport when possible; exceptionally
+                        // short screens scroll rather than clipping the lower controls.
                         VStack(spacing: spacing) {
-                            topBar
-                            Spacer(minLength: 0)
+                            topBar {
+                                pane = .lyrics
+                                withAnimation(.easeInOut(duration: 0.35)) {
+                                    scroller.scrollTo("pane", anchor: .top)
+                                }
+                            } onQueue: {
+                                pane = .queue
+                                withAnimation(.easeInOut(duration: 0.35)) {
+                                    scroller.scrollTo("pane", anchor: .top)
+                                }
+                            }
                             ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
                                 .frame(width: coverSide, height: coverSide)
                                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.12)))
@@ -44,49 +54,22 @@ struct NowPlayingView: View {
                                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: coverActive)
                                 .swipeToSkip(threshold: 90) { swiping = $0 }
                                 .padding(.horizontal, 24)
-                            titleBlock(track, compact: compact)
+                            titleBlock(track)
                             SeekBar()
-                            Spacer(minLength: 0)
                             transport
-                            actions(track) {
-                                // «Текст» swaps the queue below for the lyrics and scrolls to them
-                                withAnimation(.easeInOut(duration: 0.25)) {
-                                    pane = pane == .lyrics ? .queue : .lyrics
-                                }
-                                if pane == .lyrics {
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                                        withAnimation(.easeInOut(duration: 0.35)) {
-                                            scroller.scrollTo("pane", anchor: .top)
-                                        }
-                                    }
-                                }
-                            }
-                            Spacer(minLength: 0)
+                            actions(track)
+                            similarButton(track)
                         }
                         .padding(.top, 8)
                         .padding(.bottom, 16)
-                        .frame(height: max(geo.size.height - 8, coverSide + (compact ? 335 : 375)))
-                        Group {
+                        .frame(minHeight: max(0, geo.size.height - 8), alignment: .top)
+                        VStack(spacing: 14) {
                             switch pane {
                             case .queue: upNext
                             case .lyrics: LyricsView(trackId: track.id)
                             }
                         }
                         .id("pane")
-                        // Quiet, at the very bottom of the player.
-                        HStack {
-                            Spacer()
-                            Button { showEqualizer = true } label: {
-                                Image(systemName: "slider.horizontal.3")
-                                    .font(.title3)
-                                    .foregroundStyle(eq.enabled ? Color.white : Color.white.opacity(0.7))
-                                    .frame(width: 64, height: 48)
-                                    .background(Color.white.opacity(eq.enabled ? 0.28 : 0.12), in: Capsule())
-                            }
-                            .accessibilityLabel("Эквалайзер")
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.top, 8)
                     }
                     .frame(width: geo.size.width)
                     .padding(.bottom, 32)
@@ -113,31 +96,34 @@ struct NowPlayingView: View {
         .interactiveDismissDisabled(swiping)
     }
 
-    /// The cover never gets smaller than this, nor the player section shorter than
-    /// `minPlayerHeight`: on a very small screen the page scrolls a little instead.
-    private static let minCover: CGFloat = 150
-    private static let minPlayerHeight: CGFloat = 640
-
     /// Full size while playing, loading or waiting for the next track; smaller only when paused.
     private var coverActive: Bool { player.isPlaying || player.isBuffering || player.busy }
 
     // MARK: Parts
 
-    private var topBar: some View {
+    private func topBar(onLyrics: @escaping () -> Void, onQueue: @escaping () -> Void) -> some View {
         HStack {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold))
+                    .frame(width: 44, height: 44)
             }
+            .accessibilityLabel("Свернуть плеер")
             Spacer()
             if let track = player.current {
                 if let url = app.shareURL(track: track) {
                     SwiftUI.ShareLink(item: url) {
                         Image(systemName: "square.and.arrow.up").font(.title3)
+                            .frame(width: 44, height: 44)
                     }
-                    .padding(.trailing, 16)
                     .accessibilityLabel("Поделиться")
                 }
                 Menu {
+                    Button(action: onLyrics) {
+                        Label("Текст", systemImage: "text.alignleft")
+                    }
+                    Button(action: onQueue) {
+                        Label("Дальше", systemImage: "list.bullet")
+                    }
                     if let url = app.shareURL(track: track) {
                         SwiftUI.ShareLink(item: url) {
                             Label("Поделиться", systemImage: "square.and.arrow.up")
@@ -156,14 +142,14 @@ struct NowPlayingView: View {
                     }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.title3)
+                        .frame(width: 44, height: 44)
                 }
-                .accessibilityLabel("Не предлагать")
+                .accessibilityLabel("Меню трека")
             } else {
                 Color.clear.frame(width: 24, height: 24)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
+        .padding(.horizontal, 12)
         // the title sits in the middle of the screen whatever the buttons on the sides are
         .overlay(alignment: .center) {
             VStack(spacing: 2) {
@@ -182,53 +168,42 @@ struct NowPlayingView: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.top, 16)
             .padding(.horizontal, 110)
+            .allowsHitTesting(false)
         }
     }
 
-    private func titleBlock(_ track: Track, compact: Bool) -> some View {
-        VStack(alignment: .center, spacing: 7) {
-            if let source = Labels.source(track.source) {
-                Label(source, systemImage: "waveform")
-                    .font(.caption.weight(.semibold))
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Theme.accent, in: Capsule())
-                    .foregroundStyle(Color.black.opacity(0.82))
-            }
-
-            MarqueeText(text: track.displayTitle, font: .display(compact ? 24 : 30), centered: true)
-
-            HStack(spacing: 6) {
-                if let artist = track.artist.nonEmpty {
-                    Button { app.pendingRoute = .artist(artist) } label: {
-                        Text(artist).underline(false)
+    private func titleBlock(_ track: Track) -> some View {
+        HStack(spacing: 12) {
+            ArtworkView(trackId: track.id, size: 96, fallback: track.displayTitle, cornerRadius: 24)
+                .frame(width: 48, height: 48)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                MarqueeText(text: track.displayTitle, font: .display(20))
+                HStack(spacing: 5) {
+                    if let artist = track.artist.nonEmpty {
+                        Button { app.pendingRoute = .artist(artist) } label: {
+                            Text(artist)
+                        }
+                    }
+                    if track.artist.nonEmpty != nil, track.album.nonEmpty != nil {
+                        Text("·")
+                    }
+                    if let album = track.album.nonEmpty {
+                        Button { app.pendingRoute = .album(artist: track.artist, album: album) } label: {
+                            Text(album)
+                        }
                     }
                 }
-                if track.artist.nonEmpty != nil, track.album.nonEmpty != nil {
-                    Text("·")
-                }
-                if let album = track.album.nonEmpty {
-                    Button { app.pendingRoute = .album(artist: track.artist, album: album) } label: {
-                        Text(album)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .font(.subheadline)
-            .foregroundStyle(Color.white.opacity(0.72))
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, minHeight: 20, alignment: .center)
-            if !compact {
-                TrackInfoLine(trackId: track.id)
-                    .frame(maxWidth: .infinity, alignment: .center)
+                .buttonStyle(.plain)
+                .font(.subheadline)
+                .foregroundStyle(Color.white.opacity(0.72))
+                .lineLimit(1)
             }
         }
+        .frame(minHeight: 52)
         .padding(.horizontal, 24)
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
-
 
     private var transport: some View {
         HStack(spacing: 0) {
@@ -245,6 +220,64 @@ struct NowPlayingView: View {
             .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк и пропустить")
             Button {
                 Haptics.tap()
+                player.back()
+            } label: {
+                Image(systemName: "backward.end.fill").font(.title2)
+                    .frame(width: 44, height: 44)
+            }
+            .accessibilityLabel("Предыдущий трек")
+            Button {
+                Haptics.press()
+                player.togglePlay()
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(Theme.accent)
+                        .frame(width: 60, height: 60)
+                        .shadow(color: Theme.accent.opacity(0.32), radius: 18, y: 8)
+                    if player.isBuffering || player.busy {
+                        ProgressView().tint(.white)
+                    } else {
+                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 24, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                }
+            }
+            .accessibilityLabel(player.isPlaying ? "Пауза" : "Воспроизвести")
+            Button {
+                Haptics.tap()
+                player.skip()
+            } label: {
+                Image(systemName: "forward.end.fill").font(.title2)
+                    .frame(width: 44, height: 44)
+            }
+            .disabled(player.busy)
+            .accessibilityLabel("Следующий трек")
+            LikeChip()
+                .font(.title2)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 10)
+        .font(.title3)
+        .buttonStyle(.plain)
+        .foregroundStyle(.white)
+    }
+
+    /// Secondary controls sit below the five transport buttons, as in the reference.
+    private func actions(_ track: Track) -> some View {
+        HStack {
+            Button {
+                Haptics.tap()
+                player.seek(to: 0)
+            } label: {
+                Image(systemName: "repeat").font(.title3)
+            }
+            .accessibilityLabel("С начала")
+            Spacer(minLength: 12)
+            Button {
+                Haptics.tap()
                 if player.fixed || player.offlineMode {
                     if player.offlineMode {
                         player.playOffline(player.playlist, shuffle: true)
@@ -259,71 +292,63 @@ struct NowPlayingView: View {
                 Image(systemName: player.fixed || player.offlineMode ? "shuffle" : "arrow.clockwise").font(.title3)
             }
             .disabled(player.busy)
+            .accessibilityLabel(player.fixed || player.offlineMode ? "Перемешать" : "Обновить радио")
+            Spacer(minLength: 12)
             Button {
                 Haptics.tap()
-                player.back()
+                offline.save(track)
             } label: {
-                Image(systemName: "backward.end.fill").font(.title2)
-            }
-            Button {
-                Haptics.press()
-                player.togglePlay()
-            } label: {
-                ZStack {
-                    Circle()
-                        .fill(Theme.accent)
-                        .frame(width: 66, height: 66)
-                        .shadow(color: Theme.accent.opacity(0.32), radius: 18, y: 8)
-                    if player.isBuffering || player.busy {
+                Group {
+                    if offline.downloading.contains(track.id) {
                         ProgressView().tint(.white)
                     } else {
-                        Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 25, weight: .bold))
-                            .foregroundStyle(.white)
+                        Image(systemName: offline.isSaved(track.id) ? "checkmark" : "arrow.down.to.line")
                     }
                 }
             }
-            Button {
-                Haptics.tap()
-                player.skip()
-            } label: {
-                Image(systemName: "forward.end.fill").font(.title2)
-            }
-            .disabled(player.busy)
-            Button {
-                Haptics.tap()
-                player.seek(to: 0)
-            } label: {
-                Image(systemName: "repeat").font(.title3)
-            }
-            LikeChip()
-            }
-            .frame(maxWidth: .infinity)
+            .disabled(offline.downloading.contains(track.id) || offline.isSaved(track.id))
+            .accessibilityLabel(offline.isSaved(track.id) ? "Сохранено на телефон" : "Скачать трек")
         }
-        .padding(.horizontal, 12)
-        .foregroundStyle(.white)
+        .buttonStyle(PlayerUtilityStyle())
+        .font(.title3)
+        .padding(.horizontal, 24)
     }
 
-    /// Three focused actions from the approved player reference.
-    private func actions(_ track: Track, onLyrics: @escaping () -> Void) -> some View {
-        HStack(spacing: 10) {
-            Button(action: onLyrics) {
-                Label("Текст", systemImage: "text.alignleft").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
+    private func similarButton(_ track: Track) -> some View {
+        Button {
+            Haptics.press()
+            player.playSimilarNow()
+        } label: {
+            VStack(spacing: 3) {
+                Text("Похожее на трек")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.accentBright)
+                HStack(spacing: 6) {
+                    Image(systemName: "play.fill").font(.footnote)
+                    Text(track.displayTitle)
+                        .font(.headline)
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
             }
-            .buttonStyle(GlassChipStyle(active: pane == .lyrics))
-
-            Button { player.playSimilarNow() } label: {
-                Label("Похожее", systemImage: "circle.hexagongrid").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: 56)
+            .background {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(Color.black.opacity(0.24))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .fill(LinearGradient(colors: [Theme.accent.opacity(0.24), .clear,
+                                                         Theme.accentBright.opacity(0.12)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                    }
             }
-            .buttonStyle(GlassChipStyle())
-
-            Button { withAnimation { pane = .queue } } label: {
-                Label("Очередь", systemImage: "list.bullet").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
-            }
-            .buttonStyle(GlassChipStyle(active: pane == .queue))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.white.opacity(0.12)))
+            .contentShape(RoundedRectangle(cornerRadius: 18))
         }
-        .labelStyle(.titleAndIcon)
-        .padding(.horizontal, 20)
+        .buttonStyle(.plain)
+        .disabled(player.busy || player.offlineMode)
+        .padding(.horizontal, 24)
     }
 
     @ViewBuilder
@@ -582,7 +607,8 @@ private struct LikeChip: View {
                 .foregroundStyle(liked ? Theme.love : Color.white)
                 .scaleEffect(beat ? 1.45 : 1)
                 .shadow(color: Theme.love.opacity(beat ? 0.8 : 0), radius: 8)
-                .frame(width: 24, height: 24)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
                 .animation(.easeInOut(duration: 0.2), value: liked)
         }
         .buttonStyle(.plain)
@@ -613,6 +639,19 @@ struct GlassChipStyle: ButtonStyle {
             .background(active ? Theme.accent.opacity(0.42) : Color.black.opacity(0.24), in: Capsule())
             .overlay(Capsule().stroke(active ? Theme.accentBright.opacity(0.72) : Color.white.opacity(0.16)))
             .foregroundStyle(active ? Theme.accentBright : Color.white)
+            .opacity(configuration.isPressed ? 0.7 : 1)
+    }
+}
+
+
+/// Compact glass capsules keep the secondary row visually lighter than playback.
+private struct PlayerUtilityStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 68, height: 44)
+            .foregroundStyle(Color.white.opacity(0.8))
+            .background(Color.white.opacity(configuration.isPressed ? 0.18 : 0.08), in: Capsule())
+            .overlay(Capsule().stroke(Color.white.opacity(0.08)))
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
