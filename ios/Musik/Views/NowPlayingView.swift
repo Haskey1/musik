@@ -202,7 +202,20 @@ struct NowPlayingView: View {
                     .lineLimit(2)
                     .minimumScaleFactor(0.78)
                 Spacer(minLength: 8)
-                LikeChip().frame(width: 48)
+                VStack(spacing: 8) {
+                    LikeChip()
+                    Button {
+                        Haptics.tap()
+                        if player.disliked { player.undislike() } else { player.dislike() }
+                    } label: {
+                        Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(GlassChipStyle(active: player.disliked))
+                    .disabled(player.busy)
+                    .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк")
+                }
+                .frame(width: 48)
             }
 
             HStack(spacing: 6) {
