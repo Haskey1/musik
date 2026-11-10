@@ -51,19 +51,20 @@ struct HomeView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
+            HStack(alignment: .center) {
                 HStack(spacing: 12) {
                     Image(systemName: "music.note")
                         .font(.title2.bold())
                         .foregroundStyle(Theme.accentBright)
                         .frame(width: 48, height: 48)
                         .background(Theme.surfaceHigh, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("musik").font(.display(32))
-                        Text(greeting)
-                            .font(.footnote)
-                            .foregroundStyle(Theme.muted)
-                    }
+                    Text("musik").font(.display(32))
+                    Rectangle()
+                        .fill(Color.white.opacity(0.24))
+                        .frame(width: 1, height: 30)
+                    Text(greeting)
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.muted)
                 }
                 Spacer()
                 NavigationLink(value: Route.search) {
@@ -75,7 +76,6 @@ struct HomeView: View {
                         .overlay(Circle().stroke(Color.white.opacity(0.14)))
                 }
                 .accessibilityLabel("Поиск")
-                .padding(.top, 4)
             }
             RadioCard(heroArtist: heroArtist, fallbackTrackId: heroTrackId)
         }
@@ -119,17 +119,17 @@ struct HomeView: View {
         let main = mixes.filter { !$0.isWeekday }
         let week = mixes.filter(\.isWeekday)
         if !main.isEmpty {
-            Shelf(title: "Миксы", subtitle: "Для тебя", trailing: AnyView(refreshMixesButton)) {
+            Shelf(title: "Для тебя сегодня") {
                 ForEach(main) { mix in MixCard(mix: mix) { playMix(mix) } }
             }
         }
         if !week.isEmpty {
-            Shelf(title: "Дни недели", trailing: main.isEmpty ? AnyView(refreshMixesButton) : nil) {
+            Shelf(title: "Дни недели") {
                 ForEach(week) { mix in MixCard(mix: mix) { playMix(mix) } }
             }
         }
         if loaded && main.isEmpty && week.isEmpty && !app.offlineLaunch {
-            Shelf(title: "Миксы", subtitle: "Ещё не собраны", trailing: AnyView(refreshMixesButton)) {
+            Shelf(title: "Для тебя сегодня", subtitle: "Ещё не собрано") {
                 EmptyView()
             }
         }
@@ -358,39 +358,39 @@ private struct RadioCard: View {
             ZStack(alignment: .leading) {
                 RadioArtistBackdrop(artist: heroArtist, fallbackTrackId: fallbackTrackId)
 
-                VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("НАСТРОЙСЯ НА СВОЁ")
                         .font(.caption.weight(.bold))
                         .tracking(2)
                         .foregroundStyle(Theme.accentBright)
 
                     Text("Твой день.\nТвоя музыка.")
-                        .font(.display(36))
+                        .font(.display(38))
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text("Любимое и новые открытия — в одном потоке.")
                         .font(.subheadline)
                         .foregroundStyle(Color.white.opacity(0.76))
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 260, alignment: .leading)
+                        .frame(maxWidth: 230, alignment: .leading)
 
                     Spacer(minLength: 4)
 
-                    VStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Button {
                             Haptics.press()
                             if radioOn { player.togglePlay() } else { player.startRadio() }
                         } label: {
-                            Label(radioOn && player.isPlaying ? "Пауза радио" : "Включить моё радио",
+                            Label(radioOn && player.isPlaying ? "Пауза радио" : "Включить радио",
                                   systemImage: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
-                                .frame(maxWidth: .infinity, minHeight: 30)
+                                .frame(minWidth: 176, minHeight: 28)
                         }
                         .buttonStyle(PrimaryButtonStyle())
 
                         Button { player.playMix("favorites") } label: {
                             Label("Вспомнить любимое", systemImage: "heart")
                                 .font(.subheadline.weight(.semibold))
-                                .frame(maxWidth: .infinity, minHeight: 48)
+                                .frame(minWidth: 196, minHeight: 44)
                                 .background(Color.black.opacity(0.22), in: Capsule())
                                 .overlay(Capsule().stroke(Color.white.opacity(0.3)))
                         }
@@ -405,19 +405,21 @@ private struct RadioCard: View {
                 }
                 .padding(22)
             }
-            .frame(minHeight: 390)
+            .frame(height: 390)
             .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 30).stroke(Color.white.opacity(0.1)))
             .shadow(color: .black.opacity(0.28), radius: 22, y: 12)
 
-            MoodLayout(spacing: 8) {
-                ForEach(moods) { mood in
-                    Button { player.startRadio(mood: mood.name) } label: {
-                        Label(mood.name, systemImage: mood.icon)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(moods) { mood in
+                        Button { player.startRadio(mood: mood.name) } label: {
+                            Label(mood.name, systemImage: mood.icon)
+                        }
+                        .buttonStyle(MoodHeroButtonStyle(color: mood.color))
+                        .disabled(player.busy)
+                        .accessibilityLabel("Включить радио: \(mood.name)")
                     }
-                    .buttonStyle(MoodHeroButtonStyle(color: mood.color))
-                    .disabled(player.busy)
-                    .accessibilityLabel("Включить радио: \(mood.name)")
                 }
             }
         }
@@ -437,9 +439,23 @@ private struct MoodHeroButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.footnote.weight(.semibold))
-            .padding(.horizontal, 14)
-            .padding(.vertical, 11)
-            .background(color.opacity(configuration.isPressed ? 0.58 : 0.82), in: Capsule())
+            .padding(.horizontal, 15)
+            .padding(.vertical, 12)
+            .background {
+                Capsule()
+                    .fill(LinearGradient(colors: [color.opacity(0.98), color.opacity(0.66)],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .overlay(alignment: .topLeading) {
+                        HStack(spacing: 5) {
+                            ForEach(0..<8, id: \.self) { _ in
+                                Capsule().fill(Color.white.opacity(0.07)).frame(width: 2, height: 34)
+                            }
+                        }
+                        .rotationEffect(.degrees(28))
+                        .offset(x: 8, y: -8)
+                        .clipShape(Capsule())
+                    }
+            }
             .overlay(Capsule().stroke(Color.white.opacity(0.12)))
             .foregroundStyle(.white)
             .scaleEffect(configuration.isPressed ? 0.96 : 1)

@@ -20,7 +20,8 @@ struct ProfileSectionView: View {
 
 private extension View {
     func profileScreen(_ title: String) -> some View {
-        self.scrollContentBackground(.hidden)
+        self.listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
             .background(Theme.backdrop)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)

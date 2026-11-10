@@ -1,24 +1,28 @@
 import SwiftUI
 
-/// Warm dark palette of the web UI (style.css): bg #100c0a, accent #e07a3a, teal #3d8f7a.
+/// Warm editorial palette used across every screen. Black stays neutral while
+/// terracotta and sage appear as light, never as a brown wash over the UI.
 enum Theme {
-    static let background = Color(hex: 0x100C0A)
-    static let surface = Color(hex: 0x1C1512)
-    static let surfaceHigh = Color(hex: 0x271D18)
-    static let accent = Color(hex: 0xE07A3A)
-    static let accentBright = Color(hex: 0xF29A55)
-    static let teal = Color(hex: 0x3D8F7A)
-    static let muted = Color(hex: 0xA89C94)
+    static let background = Color(hex: 0x0D0B0A)
+    static let surface = Color(hex: 0x171310)
+    static let surfaceHigh = Color(hex: 0x241C17)
+    static let panel = Color(hex: 0x2B201A)
+    static let accent = Color(hex: 0xF1772D)
+    static let accentBright = Color(hex: 0xFF9A55)
+    static let cream = Color(hex: 0xF6E9DC)
+    static let teal = Color(hex: 0x678A70)
+    static let muted = Color(hex: 0xB7A69A)
     /// Liked heart: a warm scarlet that sits next to the orange accent.
     static let love = Color(hex: 0xF0453A)
 
     static var backdrop: some View {
         ZStack {
             background
-            RadialGradient(colors: [accent.opacity(0.18), .clear], center: .topTrailing,
-                           startRadius: 10, endRadius: 420)
-            RadialGradient(colors: [teal.opacity(0.14), .clear], center: .bottomLeading,
-                           startRadius: 10, endRadius: 480)
+            RadialGradient(colors: [accent.opacity(0.13), .clear], center: .topLeading,
+                           startRadius: 8, endRadius: 440)
+            RadialGradient(colors: [teal.opacity(0.09), .clear], center: .bottomTrailing,
+                           startRadius: 8, endRadius: 520)
+            LinearGradient(colors: [.clear, Color.black.opacity(0.32)], startPoint: .top, endPoint: .bottom)
         }
         .ignoresSafeArea()
     }
@@ -31,6 +35,25 @@ enum Theme {
             [Color(hex: 0x3B3050), Color(hex: 0x1A1524)],
         ]
         return palettes[abs(seed) % palettes.count]
+    }
+}
+
+struct WarmCardModifier: ViewModifier {
+    var radius: CGFloat = 24
+    var padding: CGFloat = 16
+
+    func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(Theme.surface.opacity(0.9), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous)
+                .stroke(Color.white.opacity(0.075)))
+    }
+}
+
+extension View {
+    func warmCard(radius: CGFloat = 24, padding: CGFloat = 16) -> some View {
+        modifier(WarmCardModifier(radius: radius, padding: padding))
     }
 }
 
@@ -58,7 +81,7 @@ struct PrimaryButtonStyle: ButtonStyle {
                 LinearGradient(colors: [Theme.accentBright, Theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing),
                 in: Capsule()
             )
-            .foregroundStyle(Color.black.opacity(0.85))
+            .foregroundStyle(Color.black.opacity(0.88))
             .opacity(configuration.isPressed ? 0.8 : 1)
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
     }

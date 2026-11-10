@@ -23,9 +23,21 @@ struct LibraryView: View {
 
     var body: some View {
         List {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(segment == .tracks ? "\(filteredTracks.count) \(tracksWord(filteredTracks.count))" : segmentSubtitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.muted)
+                Text("Вся музыка с твоего сервера")
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted.opacity(0.72))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
             Picker("Раздел", selection: $segment) {
                 ForEach(Segment.allCases) { item in
-                    Text(segmentTitle(item)).tag(item)
+                    Text(item.rawValue).tag(item)
                 }
             }
             .pickerStyle(.segmented)
@@ -51,7 +63,7 @@ struct LibraryView: View {
         .resetScrollOnReselect(tab: 1)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
-        .navigationTitle("Моя музыка")
+        .navigationTitle("Библиотека")
         .navigationBarTitleDisplayMode(.large)
         .toolbarBackground(Theme.background.opacity(0.94), for: .navigationBar)
         .searchable(text: $query, prompt: "Найти в библиотеке")
@@ -187,8 +199,21 @@ struct LibraryView: View {
         matches(t.title ?? "") || matches(t.artist ?? "") || matches(t.album ?? "")
     }
 
-    private func segmentTitle(_ item: Segment) -> String {
-        item == .tracks && !tracks.isEmpty ? "Треки \(tracks.count)" : item.rawValue
+    private var segmentSubtitle: String {
+        switch segment {
+        case .artists: return "\(artists.count) артистов"
+        case .albums: return "\(albums.count) альбомов"
+        case .favorites: return "Любимое"
+        case .all: return "Треки, артисты и альбомы"
+        case .tracks: return ""
+        }
+    }
+
+    private func tracksWord(_ n: Int) -> String {
+        let m10 = n % 10, m100 = n % 100
+        if m10 == 1 && m100 != 11 { return "трек" }
+        if (2...4).contains(m10) && !(12...14).contains(m100) { return "трека" }
+        return "треков"
     }
 
     /// Plays the visible list from the tapped row, so playback continues through it.

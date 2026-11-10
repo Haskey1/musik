@@ -1,8 +1,34 @@
 import SwiftUI
+import UIKit
 
 @main
 struct MusikApp: App {
     @StateObject private var app = AppState()
+
+    init() {
+        let tabs = UITabBarAppearance()
+        tabs.configureWithOpaqueBackground()
+        tabs.backgroundColor = UIColor(red: 0.055, green: 0.045, blue: 0.04, alpha: 0.97)
+        tabs.shadowColor = UIColor.white.withAlphaComponent(0.08)
+        let normal = UIColor(red: 0.66, green: 0.60, blue: 0.56, alpha: 1)
+        let selected = UIColor(red: 0.95, green: 0.47, blue: 0.18, alpha: 1)
+        for item in [tabs.stackedLayoutAppearance, tabs.inlineLayoutAppearance, tabs.compactInlineLayoutAppearance] {
+            item.normal.iconColor = normal
+            item.normal.titleTextAttributes = [.foregroundColor: normal]
+            item.selected.iconColor = selected
+            item.selected.titleTextAttributes = [.foregroundColor: selected]
+        }
+        UITabBar.appearance().standardAppearance = tabs
+        UITabBar.appearance().scrollEdgeAppearance = tabs
+
+        let navigation = UINavigationBarAppearance()
+        navigation.configureWithTransparentBackground()
+        navigation.titleTextAttributes = [.foregroundColor: UIColor.white]
+        navigation.largeTitleTextAttributes = [.foregroundColor: UIColor.white]
+        UINavigationBar.appearance().standardAppearance = navigation
+        UINavigationBar.appearance().scrollEdgeAppearance = navigation
+        UINavigationBar.appearance().compactAppearance = navigation
+    }
 
     var body: some Scene {
         WindowGroup {

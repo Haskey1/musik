@@ -54,7 +54,7 @@ struct ArtistDetailView: View {
                     }
                 }
 
-                TrackList(tracks: tracks, loaded: loaded) { t in
+                TrackList(tracks: tracks, loaded: loaded, carded: true) { t in
                     player.playCatalog(artist: artist, tracks: tracks, startTrackId: t.id)
                 }
 
@@ -144,7 +144,7 @@ struct AlbumDetailView: View {
                     .padding(.horizontal, 16)
                 }
 
-                TrackList(tracks: tracks, loaded: loaded, numbered: true) { t in
+                TrackList(tracks: tracks, loaded: loaded, numbered: true, carded: true) { t in
                     player.playCatalog(artist: artist, album: album, tracks: tracks, startTrackId: t.id)
                 }
 
@@ -194,19 +194,23 @@ private struct DetailHeader: View {
     let onFavorite: () -> Void
 
     var body: some View {
-        VStack(spacing: 14) {
-            Group {
-                if let artist {
-                    ArtistAvatar(artist: artist, coverTrackId: coverTrackId, size: 640, cornerRadius: 110)
-                } else {
-                    ArtworkView(trackId: coverTrackId, size: 640, fallback: title, cornerRadius: round ? 110 : 18)
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(alignment: .bottom, spacing: 18) {
+                Group {
+                    if let artist {
+                        ArtistAvatar(artist: artist, coverTrackId: coverTrackId, size: 640, cornerRadius: 38)
+                    } else {
+                        ArtworkView(trackId: coverTrackId, size: 640, fallback: title, cornerRadius: 18)
+                    }
                 }
-            }
-                .frame(width: 220, height: 220)
+                .frame(width: 160, height: 160)
                 .shadow(color: .black.opacity(0.5), radius: 20, y: 10)
-            VStack(spacing: 4) {
-                Text(title).font(.title2.weight(.bold)).multilineTextAlignment(.center)
-                Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(round ? "АРТИСТ" : "АЛЬБОМ")
+                        .font(.caption2.bold()).tracking(2).foregroundStyle(Theme.accentBright)
+                    Text(title).font(.title2.weight(.bold)).lineLimit(3)
+                    Text(subtitle).font(.subheadline).foregroundStyle(Theme.muted)
+                }
             }
             HStack(spacing: 10) {
                 Button(action: onPlay) { Label("Играть", systemImage: "play.fill") }
@@ -221,7 +225,8 @@ private struct DetailHeader: View {
                 .buttonStyle(ChipButtonStyle(active: isFavorite))
             }
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .warmCard(radius: 28, padding: 18)
         .padding(.horizontal, 16)
         .padding(.top, 12)
     }
@@ -231,6 +236,7 @@ private struct TrackList: View {
     let tracks: [Track]
     let loaded: Bool
     var numbered = false
+    var carded = false
     let onTap: (Track) -> Void
 
     var body: some View {
@@ -241,7 +247,7 @@ private struct TrackList: View {
                 EmptyHint(text: "Треков не найдено")
             }
             ForEach(Array(tracks.enumerated()), id: \.element.id) { i, t in
-                TrackRow(track: t, index: i, showArtwork: !numbered) { onTap(t) }
+                TrackRow(track: t, index: i, showArtwork: !numbered, carded: carded, showsMenu: true) { onTap(t) }
             }
         }
         .padding(.horizontal, 16)

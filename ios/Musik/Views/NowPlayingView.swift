@@ -30,10 +30,11 @@ struct NowPlayingView: View {
                         // whatever the controls leave: on a smaller phone the cover is smaller,
                         // but both rows of buttons are always in view. The queue / lyrics
                         // start below the fold.
-                        VStack(spacing: 18) {
+                        VStack(spacing: 14) {
                             topBar
                             ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
-                                .frame(maxWidth: 350, minHeight: Self.minCover, maxHeight: .infinity)
+                                .frame(width: min(geo.size.width - 48, 360),
+                                       height: min(geo.size.width - 48, 360))
                                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.12)))
                                 .shadow(color: .black.opacity(0.5), radius: 32, y: 18)
                                 // shrinks only while the listener has paused; the short pause
@@ -59,7 +60,7 @@ struct NowPlayingView: View {
                                 }
                             }
                         }
-                        .frame(height: max(geo.size.height - 8, Self.minPlayerHeight))
+                        .frame(minHeight: max(geo.size.height - 8, Self.minPlayerHeight), alignment: .top)
                         Group {
                             switch pane {
                             case .queue: upNext
@@ -119,28 +120,14 @@ struct NowPlayingView: View {
             Button { dismiss() } label: {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold))
             }
-            // radio only: «not this mood» — skips and steers the radio elsewhere
-            if !player.fixed && !player.offlineMode {
-                Button {
-                    Haptics.press()
-                    player.changeMood()
-                } label: {
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.title3.weight(.semibold))
-                }
-                .disabled(player.busy)
-                .padding(.leading, 14)
-                .accessibilityLabel("Другое настроение")
-            }
             Spacer()
             if let track = player.current {
-                if let url = app.shareURL(track: track) {
-                    SwiftUI.ShareLink(item: url) {
-                        Image(systemName: "square.and.arrow.up").font(.title3)
-                    }
-                    .padding(.trailing, 14)
-                    .accessibilityLabel("Поделиться")
-                }
                 Menu {
+                    if let url = app.shareURL(track: track) {
+                        SwiftUI.ShareLink(item: url) {
+                            Label("Поделиться", systemImage: "square.and.arrow.up")
+                        }
+                    }
                     Button { showEqualizer = true } label: {
                         Label("Эквалайзер", systemImage: "slider.horizontal.3")
                     }
@@ -165,8 +152,9 @@ struct NowPlayingView: View {
         // the title sits in the middle of the screen whatever the buttons on the sides are
         .overlay(alignment: .center) {
             VStack(spacing: 2) {
-                Text(player.listName ?? (player.fixed ? "Плейлист" : "Радио"))
-                    .font(.subheadline.weight(.semibold))
+                Text((player.listName ?? (player.fixed ? "Плейлист" : "Моё радио")).uppercased())
+                    .font(.caption.weight(.bold))
+                    .tracking(4)
                     .lineLimit(1)
                 if player.offlineMode {
                     Label("офлайн · с телефона", systemImage: "wifi.slash")
@@ -195,11 +183,15 @@ struct NowPlayingView: View {
                     .foregroundStyle(Color.black.opacity(0.82))
             }
 
-            Text(track.displayTitle)
-                .font(.display(30))
-                .multilineTextAlignment(.leading)
-                .lineLimit(2)
-                .minimumScaleFactor(0.78)
+            HStack(alignment: .center, spacing: 12) {
+                Text(track.displayTitle)
+                    .font(.display(30))
+                    .multilineTextAlignment(.leading)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                Spacer(minLength: 8)
+                LikeChip().frame(width: 48)
+            }
 
             HStack(spacing: 6) {
                 if let artist = track.artist.nonEmpty {
@@ -229,12 +221,19 @@ struct NowPlayingView: View {
 
 
     private var transport: some View {
-        HStack(spacing: 44) {
+        HStack(spacing: 27) {
+            Button {
+                Haptics.tap()
+                player.fixed ? player.playSimilarNow() : player.changeMood()
+            } label: {
+                Image(systemName: "shuffle").font(.title3)
+            }
+            .disabled(player.busy)
             Button {
                 Haptics.tap()
                 player.back()
             } label: {
-                Image(systemName: "backward.fill").font(.title)
+                Image(systemName: "backward.end.fill").font(.title2)
             }
             Button {
                 Haptics.press()
@@ -243,7 +242,7 @@ struct NowPlayingView: View {
                 ZStack {
                     Circle()
                         .fill(Theme.accent)
-                        .frame(width: 76, height: 76)
+                        .frame(width: 78, height: 78)
                         .shadow(color: Theme.accent.opacity(0.32), radius: 18, y: 8)
                     if player.isBuffering || player.busy {
                         ProgressView().tint(.white)
@@ -258,64 +257,36 @@ struct NowPlayingView: View {
                 Haptics.tap()
                 player.skip()
             } label: {
-                Image(systemName: "forward.fill").font(.title)
+                Image(systemName: "forward.end.fill").font(.title2)
             }
             .disabled(player.busy)
+            Button {
+                Haptics.tap()
+                player.seek(to: 0)
+            } label: {
+                Image(systemName: "repeat").font(.title3)
+            }
         }
         .foregroundStyle(.white)
     }
 
-    /// Two rows under the transport: rate / save, then explore.
+    /// Three focused actions from the approved player reference.
     private func actions(_ track: Track, onLyrics: @escaping () -> Void) -> some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                // a second tap takes the dislike back
-                Button {
-                    Haptics.tap()
-                    player.disliked ? player.undislike() : player.dislike()
-                } label: {
-                    Image(systemName: player.disliked ? "heart.slash.fill" : "heart.slash")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassChipStyle(active: player.disliked))
-                .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк")
-
-                Button {
-                    if offline.isSaved(track.id) { offline.remove(track.id) } else { offline.save(track) }
-                } label: {
-                    Group {
-                        if offline.downloading.contains(track.id) {
-                            ProgressView().controlSize(.small)
-                        } else {
-                            Image(systemName: offline.isSaved(track.id) ? "arrow.down.circle.fill" : "arrow.down.circle")
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassChipStyle(active: offline.isSaved(track.id)))
-                .accessibilityLabel("Сохранить на телефон")
-
-                LikeChip()
+        HStack(spacing: 10) {
+            Button(action: onLyrics) {
+                Label("Текст", systemImage: "text.alignleft").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
             }
-            HStack(spacing: 10) {
-                Button { player.playSimilarNow() } label: {
-                    Label("Похожее", systemImage: "sparkles").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassChipStyle())
+            .buttonStyle(GlassChipStyle(active: pane == .lyrics))
 
-                Button(action: onLyrics) {
-                    Label("Текст", systemImage: "quote.bubble").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassChipStyle(active: pane == .lyrics))
-
-                Button {
-                    Haptics.press()
-                    player.startRadio(seed: track.id)
-                } label: {
-                    Label("Радио", systemImage: "dot.radiowaves.left.and.right").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
-                }
-                .buttonStyle(GlassChipStyle())
+            Button { player.playSimilarNow() } label: {
+                Label("Похожее", systemImage: "circle.hexagongrid").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
             }
+            .buttonStyle(GlassChipStyle())
+
+            Button { withAnimation { pane = .queue } } label: {
+                Label("Очередь", systemImage: "list.bullet").lineLimit(1).minimumScaleFactor(0.7).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(GlassChipStyle(active: pane == .queue))
         }
         .labelStyle(.titleAndIcon)
         .padding(.horizontal, 20)
@@ -577,7 +548,7 @@ private struct LikeChip: View {
                 .foregroundStyle(liked ? Theme.love : Color.white)
                 .scaleEffect(beat ? 1.45 : 1)
                 .shadow(color: Theme.love.opacity(beat ? 0.8 : 0), radius: 8)
-                .frame(maxWidth: .infinity)
+                .frame(width: 24, height: 24)
                 .animation(.easeInOut(duration: 0.2), value: liked)
         }
         .buttonStyle(GlassChipStyle(active: liked))

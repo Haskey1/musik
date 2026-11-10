@@ -16,23 +16,23 @@ struct CoverBackdrop: View {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .blur(radius: 72)
-                    .scaleEffect(1.35)
-                    .opacity(0.42)
+                    .blur(radius: 82)
+                    .scaleEffect(1.45)
+                    .opacity(0.58)
                     .transition(.opacity)
             }
             if let color {
                 RadialGradient(
-                    colors: [Color(color).opacity(0.68), Color(color).opacity(0.12), .clear],
-                    center: .topLeading,
+                    colors: [Color(color).opacity(0.86), Color(color).opacity(0.24), .clear],
+                    center: .top,
                     startRadius: 10,
                     endRadius: 620
                 )
                 .transition(.opacity)
             }
-            Color.black.opacity(0.46)
+            Color.black.opacity(0.28)
             LinearGradient(
-                colors: [.clear, Theme.background.opacity(0.26), Theme.background.opacity(0.82)],
+                colors: [.clear, Theme.background.opacity(0.16), Theme.background.opacity(0.76)],
                 startPoint: .top,
                 endPoint: .bottom
             )

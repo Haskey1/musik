@@ -184,6 +184,7 @@ struct ArtistListRow: View {
                 }
             }
         }
+        .padding(.vertical, 5)
         .listRowBackground(Color.clear)
     }
 }
@@ -210,6 +211,7 @@ struct AlbumListRow: View {
                 }
             }
         }
+        .padding(.vertical, 5)
         .listRowBackground(Color.clear)
     }
 }
@@ -283,7 +285,7 @@ struct TrackRow: View {
             .padding(.horizontal, carded ? 12 : 0)
             .padding(.vertical, carded ? 10 : 0)
             .background(
-                carded ? (isCurrent ? Theme.accent.opacity(0.18) : Theme.surface.opacity(0.82)) : Color.clear,
+                carded ? (isCurrent ? Theme.accent.opacity(0.18) : Theme.surface.opacity(0.92)) : Color.clear,
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
             .overlay {

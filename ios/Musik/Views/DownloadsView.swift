@@ -34,12 +34,15 @@ struct DownloadsView: View {
                     .listRowBackground(Color.clear)
 
                     ForEach(Array(items.enumerated()), id: \.element.id) { i, s in
-                        TrackRow(track: s.track, unlikable: true) { play(items, at: i, shuffle: false) }
+                        TrackRow(track: s.track, carded: true, showsMenu: true, unlikable: true) {
+                            play(items, at: i, shuffle: false)
+                        }
                             .swipeActions {
                                 Button(role: .destructive) { offline.remove(s.id) } label: {
                                     Label("Удалить", systemImage: "trash")
                                 }
                             }
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
                     }
                 }

@@ -16,6 +16,19 @@ struct ProfileView: View {
     var body: some View {
         List {
             Section {
+                HStack(spacing: 14) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 50))
+                        .foregroundStyle(Theme.cream)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Твой профиль").font(.title2.bold())
+                        Text("Вкус, статистика и настройки")
+                            .font(.subheadline).foregroundStyle(Theme.muted)
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+            Section {
                 NavigationLink(value: Route.profile(.taste)) { tasteSummary }
                 row(.statistics, "Статистика", "chart.bar.fill", .teal,
                     subtitle: "За неделю и год · треки и артисты")
@@ -41,6 +54,7 @@ struct ProfileView: View {
             }
         }
         .resetScrollOnReselect(tab: 3)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
         .navigationTitle("Профиль")
@@ -77,6 +91,7 @@ struct ProfileView: View {
             }
             .padding(.vertical, 2)
         }
+        .listRowBackground(Theme.surface.opacity(0.88))
     }
 
     private var storageSubtitle: String {

@@ -5,7 +5,7 @@ struct MiniPlayer: View {
     let open: () -> Void
 
     /// 44 pt artwork + 2 × 8 pt padding + 2 pt progress line.
-    static let height: CGFloat = 62
+    static let height: CGFloat = 76
 
     var body: some View {
         if let track = player.current {
@@ -41,8 +41,13 @@ struct MiniPlayer: View {
                 MiniProgress()
             }
             .foregroundStyle(.primary)
-            .background(.ultraThinMaterial)
-            .background(Theme.surface.opacity(0.6))
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(Theme.surface.opacity(0.72), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.1)))
+            .shadow(color: .black.opacity(0.38), radius: 18, y: 8)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 6)
             .contentShape(Rectangle())
             .onTapGesture(perform: open)
             .swipeToSkip(threshold: 60, exclusive: true)

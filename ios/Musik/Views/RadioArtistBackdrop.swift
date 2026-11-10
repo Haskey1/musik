@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 import Vision
 import ImageIO
+import CoreImage
 
 /// Chooses a real artist photo for the home radio hero only when Vision can
 /// find a person in it. Logos and cover-like graphics fall back to the current
@@ -24,17 +25,23 @@ struct RadioArtistBackdrop: View {
     var body: some View {
         ZStack {
             LinearGradient(
-                colors: [Theme.accent.opacity(0.92), Theme.surfaceHigh, Theme.teal.opacity(0.72)],
+                colors: [Color(hex: 0xA94218), Color(hex: 0xD96B2B), Color(hex: 0x486653)],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
             )
 
+            Circle()
+                .fill(Theme.cream.opacity(0.09))
+                .frame(width: 300, height: 300)
+                .offset(x: 170, y: -140)
+
             if suitable, let artistImage {
                 Image(uiImage: artistImage)
                     .resizable()
-                    .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: placement.alignment)
-                    .clipped()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .scaleEffect(1.12, anchor: .bottomTrailing)
+                    .offset(x: 30, y: 12)
                     .transition(.opacity)
             } else if let fallbackImage {
                 Image(uiImage: fallbackImage)
@@ -42,24 +49,22 @@ struct RadioArtistBackdrop: View {
                     .scaledToFill()
                     .blur(radius: 24)
                     .scaleEffect(1.18)
-                    .opacity(0.72)
+                    .opacity(0.36)
                     .transition(.opacity)
             }
 
-            // The left side is always protected for copy and controls. The second
-            // fade melts any source image into the warm app surface.
             LinearGradient(
                 stops: [
-                    .init(color: Theme.surface.opacity(0.96), location: 0),
-                    .init(color: Theme.surface.opacity(0.76), location: 0.38),
-                    .init(color: Theme.surface.opacity(0.12), location: 0.72),
+                    .init(color: Color.black.opacity(0.46), location: 0),
+                    .init(color: Color.black.opacity(0.22), location: 0.44),
+                    .init(color: Color.black.opacity(0.02), location: 0.72),
                     .init(color: .clear, location: 1),
                 ],
                 startPoint: .leading,
                 endPoint: .trailing
             )
             LinearGradient(
-                colors: [.clear, Theme.surface.opacity(0.2), Theme.surface.opacity(0.68)],
+                colors: [.clear, Color.black.opacity(0.02), Color.black.opacity(0.42)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -85,8 +90,8 @@ struct RadioArtistBackdrop: View {
             let analysis = await Task.detached(priority: .utility) {
                 HeroImageAnalysis.inspect(image)
             }.value
-            if analysis.suitable {
-                artistImage = image
+            if analysis.suitable, let cutout = analysis.cutout {
+                artistImage = cutout
                 placement = analysis.placement
                 withAnimation(.easeOut(duration: 0.35)) { suitable = true }
                 return
@@ -115,29 +120,57 @@ private enum HeroPlacement {
 private struct HeroImageAnalysis {
     let suitable: Bool
     let placement: HeroPlacement
+    let cutout: UIImage?
 
     static func inspect(_ image: UIImage) -> HeroImageAnalysis {
         guard image.size.width >= 500, image.size.height >= 500,
               let cgImage = image.cgImage else {
-            return HeroImageAnalysis(suitable: false, placement: .center)
+            return HeroImageAnalysis(suitable: false, placement: .center, cutout: nil)
         }
 
         let faces = VNDetectFaceRectanglesRequest()
         let people = VNDetectHumanRectanglesRequest()
         people.upperBodyOnly = false
+        let segmentation = VNGeneratePersonSegmentationRequest()
+        segmentation.qualityLevel = .balanced
+        segmentation.outputPixelFormat = kCVPixelFormatType_OneComponent8
         let handler = VNImageRequestHandler(cgImage: cgImage, orientation: image.cgOrientation)
-        try? handler.perform([faces, people])
+        try? handler.perform([faces, people, segmentation])
 
         let boxes = (faces.results ?? []).map(\.boundingBox)
             + (people.results ?? []).map(\.boundingBox)
         guard !boxes.isEmpty else {
-            return HeroImageAnalysis(suitable: false, placement: .center)
+            return HeroImageAnalysis(suitable: false, placement: .center, cutout: nil)
         }
 
         let union = boxes.dropFirst().reduce(boxes[0]) { $0.union($1) }
         let center = union.midX
         let placement: HeroPlacement = center < 0.42 ? .leading : (center > 0.58 ? .trailing : .center)
-        return HeroImageAnalysis(suitable: true, placement: placement)
+        guard let mask = segmentation.results?.first?.pixelBuffer,
+              let cutout = personCutout(image, mask: mask) else {
+            return HeroImageAnalysis(suitable: false, placement: placement, cutout: nil)
+        }
+        return HeroImageAnalysis(suitable: true, placement: placement, cutout: cutout)
+    }
+
+    private static func personCutout(_ image: UIImage, mask: CVPixelBuffer) -> UIImage? {
+        guard let input = CIImage(image: image, options: [.applyOrientationProperty: true]) else { return nil }
+        let rawMask = CIImage(cvPixelBuffer: mask)
+        let scale = CGAffineTransform(scaleX: input.extent.width / rawMask.extent.width,
+                                      y: input.extent.height / rawMask.extent.height)
+        let fittedMask = rawMask.transformed(by: scale)
+            .clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 1.5])
+            .cropped(to: input.extent)
+        let transparent = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: 0))
+            .cropped(to: input.extent)
+        let output = input.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: transparent,
+            kCIInputMaskImageKey: fittedMask,
+        ])
+        let context = CIContext(options: [.useSoftwareRenderer: false])
+        guard let rendered = context.createCGImage(output, from: input.extent) else { return nil }
+        return UIImage(cgImage: rendered)
     }
 }
 
