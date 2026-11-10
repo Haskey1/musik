@@ -12,28 +12,34 @@ struct CoverBackdrop: View {
     var body: some View {
         GeometryReader { geometry in
         ZStack {
-            Theme.backdrop
+            Theme.background
             if let image {
                 Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
                     .blur(radius: 82)
                     .scaleEffect(1.45)
-                    .opacity(0.58)
+                    .saturation(1.35)
+                    .opacity(0.85)
                     .transition(.opacity)
             }
             if let color {
                 RadialGradient(
-                    colors: [Color(color).opacity(0.86), Color(color).opacity(0.24), .clear],
+                    colors: [Color(color).opacity(0.9), Color(color).opacity(0.48), .clear],
                     center: .top,
                     startRadius: 10,
                     endRadius: 620
                 )
                 .transition(.opacity)
+                Ellipse()
+                    .fill(Color(color).opacity(0.42))
+                    .frame(width: geometry.size.width * 1.2, height: geometry.size.height * 0.48)
+                    .blur(radius: 70)
+                    .offset(x: -geometry.size.width * 0.3, y: geometry.size.height * 0.12)
             }
-            Color.black.opacity(0.28)
+            Color.black.opacity(0.18)
             LinearGradient(
-                colors: [.clear, Theme.background.opacity(0.16), Theme.background.opacity(0.76)],
+                colors: [.clear, Theme.background.opacity(0.1), Theme.background.opacity(0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )

@@ -32,6 +32,7 @@ struct NowPlayingView: View {
                         // start below the fold.
                         VStack(spacing: 14) {
                             topBar
+                                .padding(.bottom, 18)
                             ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
                                 .frame(width: min(geo.size.width - 48, 360),
                                        height: min(geo.size.width - 48, 360))
@@ -60,6 +61,7 @@ struct NowPlayingView: View {
                                 }
                             }
                         }
+                        .padding(.top, 20)
                         .frame(minHeight: max(geo.size.height - 8, Self.minPlayerHeight), alignment: .top)
                         Group {
                             switch pane {
@@ -245,13 +247,13 @@ struct NowPlayingView: View {
                 ZStack {
                     Circle()
                         .fill(Theme.accent)
-                        .frame(width: 78, height: 78)
+                        .frame(width: 66, height: 66)
                         .shadow(color: Theme.accent.opacity(0.32), radius: 18, y: 8)
                     if player.isBuffering || player.busy {
                         ProgressView().tint(.white)
                     } else {
                         Image(systemName: player.isPlaying ? "pause.fill" : "play.fill")
-                            .font(.system(size: 30, weight: .bold))
+                            .font(.system(size: 25, weight: .bold))
                             .foregroundStyle(.white)
                     }
                 }
