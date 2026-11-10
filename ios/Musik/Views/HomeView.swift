@@ -17,6 +17,7 @@ struct HomeView: View {
     @State private var maturity: String?
     @State private var loaded = false
     @State private var refreshingMixes = false
+    @State private var showSearch = false
 
     var body: some View {
         ScrollView {
@@ -38,6 +39,17 @@ struct HomeView: View {
         // the app was opened without a connection: fill the screen once the server is back
         .onChange(of: app.offlineLaunch) { offline in if !offline { Task { await load() } } }
         .navigationBarHidden(true)
+        .sheet(isPresented: $showSearch) {
+            NavigationStack {
+                SearchView()
+                    .withRoutes()
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Готово") { showSearch = false }
+                        }
+                    }
+            }
+        }
         // No navigation bar here, so give the status bar its own backdrop:
         // otherwise shelf titles scroll right under the clock.
     }
@@ -62,9 +74,7 @@ struct HomeView: View {
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer()
-                NavigationLink {
-                    SearchView().miniPlayerSpace()
-                } label: {
+                Button { showSearch = true } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(Color.white)
@@ -73,6 +83,7 @@ struct HomeView: View {
                         .overlay(Circle().stroke(Color.white.opacity(0.14)))
                 }
                 .accessibilityLabel("Поиск")
+                .buttonStyle(.plain)
             }
             RadioCard(heroArtist: heroArtist, fallbackTrackId: heroTrackId)
         }
@@ -354,6 +365,7 @@ private struct RadioCard: View {
         VStack(alignment: .leading, spacing: 12) {
             ZStack(alignment: .leading) {
                 RadioArtistBackdrop(artist: heroArtist, fallbackTrackId: fallbackTrackId)
+                    .allowsHitTesting(false)
 
                 VStack(alignment: .leading, spacing: 12) {
                     Text("НАСТРОЙСЯ НА СВОЁ")

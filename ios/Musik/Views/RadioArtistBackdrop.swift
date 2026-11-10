@@ -98,6 +98,15 @@ struct RadioArtistBackdrop: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+            // Foreground mist remains visible over the cutout, not only behind it.
+            HazeTexture()
+                .opacity(0.65)
+                .mask(LinearGradient(colors: [.clear, .white], startPoint: .top, endPoint: .bottom))
+            Ellipse()
+                .fill(Theme.cream.opacity(0.35))
+                .frame(width: geometry.size.width * 1.3, height: geometry.size.height * 0.28)
+                .blur(radius: 32)
+                .offset(y: geometry.size.height * 0.25)
         }
         .frame(width: geometry.size.width, height: geometry.size.height)
         .clipped()
