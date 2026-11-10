@@ -73,14 +73,6 @@ struct RadioArtistBackdrop: View {
                     .frame(width: geometry.size.width, height: geometry.size.height,
                            alignment: .bottomTrailing)
                     .transition(.opacity)
-            } else if let fallbackImage {
-                Image(uiImage: fallbackImage)
-                    .resizable()
-                    .scaledToFill()
-                    .blur(radius: 24)
-                    .scaleEffect(1.18)
-                    .opacity(0.36)
-                    .transition(.opacity)
             }
 
             LinearGradient(

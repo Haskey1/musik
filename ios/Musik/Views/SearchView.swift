@@ -62,12 +62,14 @@ struct SearchView: View {
                 } header: { header("Треки") }
             }
         }
-        .listStyle(.plain)
+        .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.backdrop)
         .navigationTitle("Поиск")
         .navigationBarHidden(false)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .onAppear {
