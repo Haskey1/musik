@@ -62,7 +62,9 @@ struct HomeView: View {
                         .foregroundStyle(Theme.muted)
                 }
                 Spacer()
-                NavigationLink(value: Route.search) {
+                NavigationLink {
+                    SearchView().miniPlayerSpace()
+                } label: {
                     Image(systemName: "magnifyingglass")
                         .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(Color.white)

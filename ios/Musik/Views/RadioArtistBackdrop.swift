@@ -36,6 +36,15 @@ struct RadioArtistBackdrop: View {
                 .frame(width: 300, height: 300)
                 .offset(x: 170, y: -140)
 
+            HazeTexture()
+                .opacity(0.3)
+                .blendMode(.screen)
+            Ellipse()
+                .fill(Theme.cream.opacity(0.22))
+                .frame(width: geometry.size.width * 0.85, height: geometry.size.height * 0.55)
+                .blur(radius: 45)
+                .offset(x: geometry.size.width * 0.18, y: geometry.size.height * 0.16)
+
             if suitable, let artistImage {
                 ZStack {
                     portrait(artistImage, width: geometry.size.width * 0.76,

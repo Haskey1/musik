@@ -67,6 +67,7 @@ struct SearchView: View {
         .scrollDismissesKeyboard(.interactively)
         .background(Theme.backdrop)
         .navigationTitle("Поиск")
+        .navigationBarHidden(false)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .onAppear {
