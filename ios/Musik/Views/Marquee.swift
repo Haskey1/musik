@@ -8,6 +8,7 @@ import SwiftUI
 struct MarqueeText: View {
     let text: String
     var font: Font = .subheadline
+    var centered = false
 
     @State private var textWidth: CGFloat = 0
     @State private var boxWidth: CGFloat = 0
@@ -37,7 +38,7 @@ struct MarqueeText: View {
                             .onAppear { textWidth = geo.size.width }
                             .onChange(of: geo.size.width) { textWidth = $0 }
                     })
-                    .offset(x: offset)
+                    .offset(x: overflow > 1 || !centered ? offset : max(0, (boxWidth - textWidth) / 2))
             }
             .clipped()
             .mask(

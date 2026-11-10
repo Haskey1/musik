@@ -186,7 +186,7 @@ struct NowPlayingView: View {
     }
 
     private func titleBlock(_ track: Track, compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .center, spacing: 7) {
             if let source = Labels.source(track.source) {
                 Label(source, systemImage: "waveform")
                     .font(.caption.weight(.semibold))
@@ -196,23 +196,7 @@ struct NowPlayingView: View {
                     .foregroundStyle(Color.black.opacity(0.82))
             }
 
-            HStack(alignment: .center, spacing: 12) {
-                MarqueeText(text: track.displayTitle, font: .display(compact ? 24 : 30))
-                HStack(spacing: 6) {
-                    LikeChip()
-                    Button {
-                        Haptics.tap()
-                        if player.disliked { player.undislike() } else { player.dislikeAndSkip() }
-                    } label: {
-                        Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                            .frame(width: 24, height: 24)
-                    }
-                    .buttonStyle(GlassChipStyle(active: player.disliked))
-                    .disabled(player.busy)
-                    .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк и пропустить")
-                }
-                .frame(width: 104)
-            }
+            MarqueeText(text: track.displayTitle, font: .display(compact ? 24 : 30), centered: true)
 
             HStack(spacing: 6) {
                 if let artist = track.artist.nonEmpty {
@@ -245,7 +229,18 @@ struct NowPlayingView: View {
 
 
     private var transport: some View {
-        HStack(spacing: 27) {
+        HStack(spacing: 0) {
+            Group {
+            Button {
+                Haptics.tap()
+                if player.disliked { player.undislike() } else { player.dislikeAndSkip() }
+            } label: {
+                Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
+                    .foregroundStyle(player.disliked ? Theme.accentBright : .white)
+                    .frame(minHeight: 44)
+            }
+            .disabled(player.busy)
+            .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк и пропустить")
             Button {
                 Haptics.tap()
                 if player.fixed || player.offlineMode {
@@ -299,7 +294,11 @@ struct NowPlayingView: View {
             } label: {
                 Image(systemName: "repeat").font(.title3)
             }
+            LikeChip()
+            }
+            .frame(maxWidth: .infinity)
         }
+        .padding(.horizontal, 12)
         .foregroundStyle(.white)
     }
 
@@ -584,7 +583,7 @@ private struct LikeChip: View {
                 .frame(width: 24, height: 24)
                 .animation(.easeInOut(duration: 0.2), value: liked)
         }
-        .buttonStyle(GlassChipStyle(active: liked))
+        .buttonStyle(.plain)
         .accessibilityLabel(liked ? "Убрать из любимых" : "В любимые")
     }
 
