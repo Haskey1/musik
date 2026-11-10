@@ -369,10 +369,10 @@ private fun RadioCard(model: HomeModel) {
             Triple("Весёлое", Icons.Filled.SentimentSatisfied, MusikColors.accentBright), Triple("Грустное", Icons.Filled.Cloud, Color(0xFF7E665B)))
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             moods.forEach { (name, icon, color) ->
-                Row(Modifier.clip(CircleShape).background(color.copy(alpha = 0.18f)).border(1.dp, color.copy(alpha = 0.4f), CircleShape)
+                Row(Modifier.clip(CircleShape).background(Brush.linearGradient(listOf(color.copy(alpha = 0.98f), color.copy(alpha = 0.66f)))).border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
                     .clickable(enabled = !player.busy) { Haptics.press(context, App.settings); player.startRadio(mood = name) }
                     .padding(horizontal = 14.dp, vertical = 11.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(icon, null, Modifier.size(16.dp), tint = color)
+                    Icon(icon, null, Modifier.size(16.dp), tint = Color.White)
                     Text(name, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 }
             }

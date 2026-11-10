@@ -4,6 +4,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import app.musik.android.ui.Routes
 import app.musik.android.ui.ScrollToTopOnReselect
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -140,7 +141,7 @@ fun LibraryScreen() {
     val model = LibraryModel.shared
     val state = App.state
     val scope = rememberCoroutineScope()
-    var segment by rememberSaveable { mutableStateOf(0) }
+    var segment by rememberSaveable { mutableStateOf(1) }
     var query by rememberSaveable { mutableStateOf("") }
 
     LaunchedEffect(Unit) { if (!model.loaded) model.load() }
@@ -167,6 +168,15 @@ fun LibraryScreen() {
             item {
                 Column(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Библиотека", style = displayStyle(32))
+                    val summary = when (segment) {
+                        1 -> tracksWord(model.tracks.count { matchesTrack(it) })
+                        2 -> "${model.artists.size} артистов"
+                        3 -> "${model.albums.size} альбомов"
+                        4 -> "Твоя любимая музыка"
+                        else -> "Треки, артисты и альбомы"
+                    }
+                    Text(summary, color = MusikColors.muted, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text("Вся музыка с твоего сервера", color = MusikColors.muted.copy(alpha = 0.72f), fontSize = 12.sp)
                     OutlinedTextField(
                         value = query,
                         onValueChange = { query = it },
@@ -186,7 +196,7 @@ fun LibraryScreen() {
                             cursorColor = MusikColors.accent,
                         ),
                     )
-                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().background(MusikColors.surfaceHigh.copy(alpha = 0.82f), RoundedCornerShape(16.dp)).padding(6.dp)) {
                         segments.forEachIndexed { i, title ->
                             SegmentedButton(
                                 selected = segment == i,
