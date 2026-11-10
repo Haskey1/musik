@@ -197,13 +197,8 @@ struct NowPlayingView: View {
             }
 
             HStack(alignment: .center, spacing: 12) {
-                Text(track.displayTitle)
-                    .font(.display(compact ? 24 : 30))
-                    .multilineTextAlignment(.leading)
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.78)
-                Spacer(minLength: 8)
-                VStack(spacing: 8) {
+                MarqueeText(text: track.displayTitle, font: .display(compact ? 24 : 30))
+                HStack(spacing: 6) {
                     LikeChip()
                     Button {
                         Haptics.tap()
@@ -216,7 +211,7 @@ struct NowPlayingView: View {
                     .disabled(player.busy)
                     .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк и пропустить")
                 }
-                .frame(width: 48)
+                .frame(width: 104)
             }
 
             HStack(spacing: 6) {
@@ -238,8 +233,11 @@ struct NowPlayingView: View {
             .font(.subheadline)
             .foregroundStyle(Color.white.opacity(0.72))
             .lineLimit(1)
-            .frame(minHeight: 20)
-            if !compact { TrackInfoLine(trackId: track.id) }
+            .frame(maxWidth: .infinity, minHeight: 20, alignment: .center)
+            if !compact {
+                TrackInfoLine(trackId: track.id)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, alignment: .leading)
