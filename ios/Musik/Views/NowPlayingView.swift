@@ -206,14 +206,14 @@ struct NowPlayingView: View {
                     LikeChip()
                     Button {
                         Haptics.tap()
-                        if player.disliked { player.undislike() } else { player.dislike() }
+                        if player.disliked { player.undislike() } else { player.dislikeAndSkip() }
                     } label: {
                         Image(systemName: player.disliked ? "hand.thumbsdown.fill" : "hand.thumbsdown")
                             .frame(width: 24, height: 24)
                     }
                     .buttonStyle(GlassChipStyle(active: player.disliked))
                     .disabled(player.busy)
-                    .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк")
+                    .accessibilityLabel(player.disliked ? "Снять дизлайк" : "Дизлайк и пропустить")
                 }
                 .frame(width: 48)
             }
