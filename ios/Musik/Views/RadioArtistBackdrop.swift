@@ -37,11 +37,30 @@ struct RadioArtistBackdrop: View {
                 .offset(x: 170, y: -140)
 
             if suitable, let artistImage {
-                Image(uiImage: artistImage)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: geometry.size.width * 0.48, height: geometry.size.height,
-                           alignment: .bottomTrailing)
+                ZStack {
+                    portrait(artistImage, width: geometry.size.width * 0.76,
+                             height: geometry.size.height)
+                        .blur(radius: 12)
+                        .opacity(0.45)
+                    portrait(artistImage, width: geometry.size.width * 0.76,
+                             height: geometry.size.height)
+                }
+                    .mask {
+                        LinearGradient(stops: [
+                            .init(color: .clear, location: 0),
+                            .init(color: .white, location: 0.22),
+                            .init(color: .white, location: 0.9),
+                            .init(color: .clear, location: 1),
+                        ], startPoint: .leading, endPoint: .trailing)
+                        .mask {
+                            LinearGradient(stops: [
+                                .init(color: .clear, location: 0),
+                                .init(color: .white, location: 0.15),
+                                .init(color: .white, location: 0.88),
+                                .init(color: .clear, location: 1),
+                            ], startPoint: .top, endPoint: .bottom)
+                        }
+                    }
                     .frame(width: geometry.size.width, height: geometry.size.height,
                            alignment: .bottomTrailing)
                     .transition(.opacity)
@@ -77,6 +96,21 @@ struct RadioArtistBackdrop: View {
         .task(id: LoadKey(artistURL: artistURL, fallbackTrackId: fallbackTrackId)) {
             await load()
         }
+    }
+
+    private func portrait(_ image: UIImage, width: CGFloat, height: CGFloat) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFit()
+            .mask {
+                LinearGradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .white, location: 0.12),
+                    .init(color: .white, location: 0.94),
+                    .init(color: .clear, location: 1),
+                ], startPoint: .top, endPoint: .bottom)
+            }
+            .frame(width: width, height: height, alignment: .bottomTrailing)
     }
 
     private struct LoadKey: Hashable {
