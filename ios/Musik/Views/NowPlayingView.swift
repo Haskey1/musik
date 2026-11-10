@@ -23,6 +23,8 @@ struct NowPlayingView: View {
             CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
                 GeometryReader { geo in
+                let compact = geo.size.height < 760
+                let coverSide = max(140, min(geo.size.width - 48, 360, geo.size.height - (compact ? 480 : 460)))
                 ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 20) {
@@ -30,12 +32,11 @@ struct NowPlayingView: View {
                         // whatever the controls leave: on a smaller phone the cover is smaller,
                         // but both rows of buttons are always in view. The queue / lyrics
                         // start below the fold.
-                        VStack(spacing: 14) {
+                        VStack(spacing: compact ? 8 : 14) {
                             topBar
-                                .padding(.bottom, 18)
+                                .padding(.bottom, compact ? 2 : 18)
                             ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
-                                .frame(width: min(geo.size.width - 48, 360),
-                                       height: min(geo.size.width - 48, 360))
+                                .frame(width: coverSide, height: coverSide)
                                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.12)))
                                 .shadow(color: .black.opacity(0.5), radius: 32, y: 18)
                                 // shrinks only while the listener has paused; the short pause
@@ -44,7 +45,7 @@ struct NowPlayingView: View {
                                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: coverActive)
                                 .swipeToSkip(threshold: 90) { swiping = $0 }
                                 .padding(.horizontal, 24)
-                            titleBlock(track)
+                            titleBlock(track, compact: compact)
                             SeekBar()
                             transport
                             actions(track) {
@@ -61,8 +62,8 @@ struct NowPlayingView: View {
                                 }
                             }
                         }
-                        .padding(.top, 20)
-                        .frame(minHeight: max(geo.size.height - 8, Self.minPlayerHeight), alignment: .top)
+                        .padding(.top, compact ? 4 : 20)
+                        .frame(minHeight: geo.size.height - 8, alignment: .top)
                         Group {
                             switch pane {
                             case .queue: upNext
@@ -184,7 +185,7 @@ struct NowPlayingView: View {
         }
     }
 
-    private func titleBlock(_ track: Track) -> some View {
+    private func titleBlock(_ track: Track, compact: Bool) -> some View {
         VStack(alignment: .leading, spacing: 7) {
             if let source = Labels.source(track.source) {
                 Label(source, systemImage: "waveform")
@@ -197,7 +198,7 @@ struct NowPlayingView: View {
 
             HStack(alignment: .center, spacing: 12) {
                 Text(track.displayTitle)
-                    .font(.display(30))
+                    .font(.display(compact ? 24 : 30))
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .minimumScaleFactor(0.78)
@@ -238,7 +239,7 @@ struct NowPlayingView: View {
             .foregroundStyle(Color.white.opacity(0.72))
             .lineLimit(1)
             .frame(minHeight: 20)
-            TrackInfoLine(trackId: track.id)
+            if !compact { TrackInfoLine(trackId: track.id) }
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, alignment: .leading)

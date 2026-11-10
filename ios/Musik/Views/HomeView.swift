@@ -387,14 +387,16 @@ private struct RadioCard: View {
                         } label: {
                             Label(radioOn && player.isPlaying ? "Пауза радио" : "Включить радио",
                                   systemImage: radioOn && player.isPlaying ? "pause.fill" : "play.fill")
-                                .frame(minWidth: 176, minHeight: 28)
+                                .font(.subheadline.weight(.semibold))
+                                .frame(minWidth: 146, minHeight: 20)
                         }
                         .buttonStyle(PrimaryButtonStyle())
 
                         Button { player.playMix("favorites") } label: {
                             Label("Вспомнить любимое", systemImage: "heart")
-                                .font(.subheadline.weight(.semibold))
-                                .frame(minWidth: 196, minHeight: 44)
+                                .font(.footnote.weight(.semibold))
+                                .padding(.horizontal, 12)
+                                .frame(minWidth: 170, minHeight: 40)
                                 .background(Color.black.opacity(0.22), in: Capsule())
                                 .overlay(Capsule().stroke(Color.white.opacity(0.3)))
                         }
