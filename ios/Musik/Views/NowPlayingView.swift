@@ -23,18 +23,17 @@ struct NowPlayingView: View {
             CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
                 GeometryReader { geo in
-                let compact = geo.size.height < 760
-                let coverSide = max(140, min(geo.size.width - 48, 360, geo.size.height - (compact ? 480 : 460)))
+                let compact = geo.size.height < 650
+                let spacing = min(14, max(8, (geo.size.height - 560) / 18))
+                let coverSide = max(140, min(geo.size.width - 48, 360, geo.size.height - 390))
                 ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 20) {
-                        // The player proper is exactly one screen tall, and the cover takes
-                        // whatever the controls leave: on a smaller phone the cover is smaller,
-                        // but both rows of buttons are always in view. The queue / lyrics
-                        // start below the fold.
-                        VStack(spacing: compact ? 8 : 14) {
+                        // A finite viewport lets spacers share spare height; exceptionally
+                        // short screens scroll the complete player rather than clipping it.
+                        VStack(spacing: spacing) {
                             topBar
-                                .padding(.bottom, compact ? 2 : 18)
+                            Spacer(minLength: 0)
                             ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
                                 .frame(width: coverSide, height: coverSide)
                                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.12)))
@@ -47,6 +46,7 @@ struct NowPlayingView: View {
                                 .padding(.horizontal, 24)
                             titleBlock(track, compact: compact)
                             SeekBar()
+                            Spacer(minLength: 0)
                             transport
                             actions(track) {
                                 // «Текст» swaps the queue below for the lyrics and scrolls to them
@@ -61,9 +61,11 @@ struct NowPlayingView: View {
                                     }
                                 }
                             }
+                            Spacer(minLength: 0)
                         }
-                        .padding(.top, compact ? 4 : 20)
-                        .frame(minHeight: geo.size.height - 8, alignment: .top)
+                        .padding(.top, 8)
+                        .padding(.bottom, 16)
+                        .frame(height: max(geo.size.height - 8, coverSide + (compact ? 335 : 375)))
                         Group {
                             switch pane {
                             case .queue: upNext
