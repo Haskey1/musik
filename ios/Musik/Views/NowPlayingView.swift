@@ -22,17 +22,10 @@ struct NowPlayingView: View {
             CoverBackdrop(trackId: player.current?.id)
             if let track = player.current {
                 GeometryReader { geo in
-                let compact = geo.size.height < 700
-                let spacing: CGFloat = compact ? 8 : 10
-                // Reserve all controls before sizing the cover. Short viewports scroll.
-                let coverSide = max(140, min(geo.size.width * 0.76, 360,
-                                             geo.size.height - (compact ? 488 : 500)))
                 ScrollViewReader { scroller in
                 ScrollView {
                     VStack(spacing: 20) {
-                        // The complete player fits the viewport when possible; exceptionally
-                        // short screens scroll rather than clipping the lower controls.
-                        VStack(spacing: spacing) {
+                        PlayerScreenLayout(viewportHeight: geo.size.height) {
                             topBar {
                                 pane = .lyrics
                                 withAnimation(.easeInOut(duration: 0.35)) {
@@ -45,7 +38,6 @@ struct NowPlayingView: View {
                                 }
                             }
                             ArtworkView(trackId: track.id, size: 640, fallback: track.displayTitle, cornerRadius: 28)
-                                .frame(width: coverSide, height: coverSide)
                                 .overlay(RoundedRectangle(cornerRadius: 28).stroke(Color.white.opacity(0.12)))
                                 .shadow(color: .black.opacity(0.5), radius: 32, y: 18)
                                 // shrinks only while the listener has paused; the short pause
@@ -53,16 +45,12 @@ struct NowPlayingView: View {
                                 .scaleEffect(coverActive ? 1 : 0.94)
                                 .animation(.spring(response: 0.4, dampingFraction: 0.8), value: coverActive)
                                 .swipeToSkip(threshold: 90) { swiping = $0 }
-                                .padding(.horizontal, 24)
                             titleBlock(track)
                             SeekBar()
                             transport
                             actions(track)
                             similarButton(track)
                         }
-                        .padding(.top, 8)
-                        .padding(.bottom, 16)
-                        .frame(minHeight: max(0, geo.size.height - 8), alignment: .top)
                         VStack(spacing: 14) {
                             switch pane {
                             case .queue: upNext
@@ -175,9 +163,10 @@ struct NowPlayingView: View {
 
     private func titleBlock(_ track: Track) -> some View {
         HStack(spacing: 12) {
-            ArtworkView(trackId: track.id, size: 96, fallback: track.displayTitle, cornerRadius: 24)
+            ArtistAvatar(artist: track.displayArtist, coverTrackId: nil, size: 96, cornerRadius: 24)
                 .frame(width: 48, height: 48)
                 .accessibilityHidden(true)
+                .task { await ArtistPhotos.shared.refresh(app.api) }
             VStack(alignment: .leading, spacing: 3) {
                 MarqueeText(text: track.displayTitle, font: .display(20))
                 HStack(spacing: 5) {
@@ -643,6 +632,60 @@ struct GlassChipStyle: ButtonStyle {
     }
 }
 
+
+/// Measure the controls first, then fit the cover and distribute remaining height
+/// between sections. The banner ends above the safe area on every phone size.
+/// With larger accessibility text or a short viewport, the whole player can scroll.
+private struct PlayerScreenLayout: Layout {
+    let viewportHeight: CGFloat
+
+    private struct Metrics {
+        let sizes: [CGSize]
+        let gaps: [CGFloat]
+        let height: CGFloat
+    }
+
+    private func metrics(width: CGFloat, subviews: Subviews) -> Metrics {
+        let top: CGFloat = 8
+        let bottom: CGFloat = 16
+        let minimumGap: CGFloat = viewportHeight < 700 ? 8 : 12
+        let weights: [CGFloat] = [2, 2, 0.5, 0.5, 2, 3]
+        // Children: header, cover, track details, seek, transport, utilities, similar.
+        var sizes = subviews.map { $0.sizeThatFits(ProposedViewSize(width: width, height: nil)) }
+        let controlsHeight = sizes.enumerated().reduce(CGFloat.zero) {
+            $0 + ($1.offset == 1 ? 0 : $1.element.height)
+        }
+        let idealCover = max(1, min(width * 0.76, width - 48, 360))
+        let availableCover = viewportHeight - top - bottom - controlsHeight
+            - minimumGap * CGFloat(weights.count)
+        let cover = min(idealCover, max(140, availableCover))
+        sizes[1] = CGSize(width: cover, height: cover)
+        let contentHeight = top + bottom + controlsHeight + cover
+            + minimumGap * CGFloat(weights.count)
+        let height = max(viewportHeight, contentHeight)
+        let extra = max(0, height - contentHeight)
+        let totalWeight = weights.reduce(0, +)
+        return Metrics(sizes: sizes, gaps: weights.map { minimumGap + extra * $0 / totalWeight },
+                       height: height)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? 390
+        return CGSize(width: width, height: metrics(width: width, subviews: subviews).height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let layout = metrics(width: bounds.width, subviews: subviews)
+        var y = bounds.minY + 8
+        for index in subviews.indices {
+            let size = layout.sizes[index]
+            subviews[index].place(at: CGPoint(x: bounds.midX, y: y), anchor: .top,
+                                  proposal: ProposedViewSize(size))
+            y += size.height
+            if index < layout.gaps.count { y += layout.gaps[index] }
+        }
+    }
+}
 
 /// Compact glass capsules keep the secondary row visually lighter than playback.
 private struct PlayerUtilityStyle: ButtonStyle {
