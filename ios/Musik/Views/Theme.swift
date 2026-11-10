@@ -3,7 +3,7 @@ import SwiftUI
 /// Warm editorial palette used across every screen. Black stays neutral while
 /// terracotta and sage appear as light, never as a brown wash over the UI.
 enum Theme {
-    static let background = Color(hex: 0x0D0B0A)
+    static let background = Color(hex: 0x191512)
     static let surface = Color(hex: 0x171310)
     static let surfaceHigh = Color(hex: 0x241C17)
     static let panel = Color(hex: 0x2B201A)
@@ -18,6 +18,7 @@ enum Theme {
     static var backdrop: some View {
         ZStack {
             background
+            HazeTexture().opacity(0.14)
             RadialGradient(colors: [accent.opacity(0.13), .clear], center: .topLeading,
                            startRadius: 8, endRadius: 440)
             RadialGradient(colors: [teal.opacity(0.09), .clear], center: .bottomTrailing,
@@ -35,6 +36,23 @@ enum Theme {
             [Color(hex: 0x3B3050), Color(hex: 0x1A1524)],
         ]
         return palettes[abs(seed) % palettes.count]
+    }
+}
+
+/// Deterministic translucent wisps give the gradients a soft smoky texture.
+struct HazeTexture: View {
+    var body: some View {
+        Canvas { context, size in
+            context.addFilter(.blur(radius: 28))
+            for i in 0..<18 {
+                let x = CGFloat((i * 73) % 101) / 100 * size.width
+                let y = CGFloat((i * 47) % 103) / 102 * size.height
+                let rect = CGRect(x: x - size.width * 0.35, y: y,
+                                  width: size.width * 0.8, height: size.height * 0.13)
+                context.fill(Path(ellipseIn: rect), with: .color(.white.opacity(0.22)))
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

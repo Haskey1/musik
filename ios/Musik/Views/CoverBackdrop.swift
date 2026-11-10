@@ -37,6 +37,7 @@ struct CoverBackdrop: View {
                     .blur(radius: 70)
                     .offset(x: -geometry.size.width * 0.3, y: geometry.size.height * 0.12)
             }
+            HazeTexture().opacity(0.32)
             Color.black.opacity(0.18)
             LinearGradient(
                 colors: [.clear, Theme.background.opacity(0.1), Theme.background.opacity(0.6)],

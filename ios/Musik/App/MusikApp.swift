@@ -95,7 +95,7 @@ struct MainView: View {
                 .environmentObject(player)
                 .environmentObject(player.clock)
                 .environmentObject(app.offline)
-                .presentationDragIndicator(.visible)
+                .presentationDragIndicator(.hidden)
         }
         .background(TabReselectObserver())
         .onReceive(NotificationCenter.default.publisher(for: .tabReselected)) { note in

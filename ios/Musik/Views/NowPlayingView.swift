@@ -105,7 +105,7 @@ struct NowPlayingView: View {
             }
         }
         .tint(.white)
-        .overlay(alignment: .top) { ToastView() }
+        .overlay(alignment: .top) { ToastView().padding(.top, 62) }
         .sheet(isPresented: $showEqualizer) { EqualizerView() }
         .interactiveDismissDisabled(swiping)
     }
@@ -127,6 +127,13 @@ struct NowPlayingView: View {
             }
             Spacer()
             if let track = player.current {
+                if let url = app.shareURL(track: track) {
+                    SwiftUI.ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up").font(.title3)
+                    }
+                    .padding(.trailing, 16)
+                    .accessibilityLabel("Поделиться")
+                }
                 Menu {
                     if let url = app.shareURL(track: track) {
                         SwiftUI.ShareLink(item: url) {
@@ -229,9 +236,18 @@ struct NowPlayingView: View {
         HStack(spacing: 27) {
             Button {
                 Haptics.tap()
-                player.fixed ? player.playSimilarNow() : player.changeMood()
+                if player.fixed || player.offlineMode {
+                    if player.offlineMode {
+                        player.playOffline(player.playlist, shuffle: true)
+                    } else {
+                        player.play(["track_ids": player.playlist.shuffled().map(\.id),
+                                     "name": player.listName ?? "Плейлист"])
+                    }
+                } else {
+                    player.startRadio()
+                }
             } label: {
-                Image(systemName: "shuffle").font(.title3)
+                Image(systemName: player.fixed || player.offlineMode ? "shuffle" : "arrow.clockwise").font(.title3)
             }
             .disabled(player.busy)
             Button {

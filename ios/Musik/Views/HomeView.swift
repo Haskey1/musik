@@ -40,11 +40,6 @@ struct HomeView: View {
         .navigationBarHidden(true)
         // No navigation bar here, so give the status bar its own backdrop:
         // otherwise shelf titles scroll right under the clock.
-        .overlay(alignment: .top) {
-            Color.clear
-                .frame(height: 0)
-                .background(.ultraThinMaterial, ignoresSafeAreaEdges: .top)
-        }
     }
 
     // MARK: Header
@@ -119,7 +114,7 @@ struct HomeView: View {
         let main = mixes.filter { !$0.isWeekday }
         let week = mixes.filter(\.isWeekday)
         if !main.isEmpty {
-            Shelf(title: "Для тебя сегодня") {
+            Shelf(title: "Для тебя сегодня", trailing: AnyView(refreshMixesButton)) {
                 ForEach(main) { mix in MixCard(mix: mix) { playMix(mix) } }
             }
         }
@@ -129,7 +124,7 @@ struct HomeView: View {
             }
         }
         if loaded && main.isEmpty && week.isEmpty && !app.offlineLaunch {
-            Shelf(title: "Для тебя сегодня", subtitle: "Ещё не собрано") {
+            Shelf(title: "Для тебя сегодня", subtitle: "Ещё не собрано", trailing: AnyView(refreshMixesButton)) {
                 EmptyView()
             }
         }
