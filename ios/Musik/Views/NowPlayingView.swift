@@ -162,35 +162,39 @@ struct NowPlayingView: View {
     }
 
     private func titleBlock(_ track: Track) -> some View {
-        HStack(spacing: 12) {
-            ArtistAvatar(artist: track.displayArtist, coverTrackId: nil, size: 96, cornerRadius: 24)
-                .frame(width: 48, height: 48)
-                .accessibilityHidden(true)
-                .task { await ArtistPhotos.shared.refresh(app.api) }
-            VStack(alignment: .leading, spacing: 3) {
-                MarqueeText(text: track.displayTitle, font: .display(20))
-                HStack(spacing: 5) {
-                    if let artist = track.artist.nonEmpty {
-                        Button { app.pendingRoute = .artist(artist) } label: {
-                            Text(artist)
+        VStack(spacing: 6) {
+            HStack(spacing: 12) {
+                ArtistAvatar(artist: track.displayArtist, coverTrackId: nil, size: 96, cornerRadius: 24)
+                    .frame(width: 48, height: 48)
+                    .accessibilityHidden(true)
+                    .task { await ArtistPhotos.shared.refresh(app.api) }
+                VStack(alignment: .leading, spacing: 3) {
+                    MarqueeText(text: track.displayTitle, font: .display(20))
+                    HStack(spacing: 5) {
+                        if let artist = track.artist.nonEmpty {
+                            Button { app.pendingRoute = .artist(artist) } label: {
+                                Text(artist)
+                            }
+                        }
+                        if track.artist.nonEmpty != nil, track.album.nonEmpty != nil {
+                            Text("·")
+                        }
+                        if let album = track.album.nonEmpty {
+                            Button { app.pendingRoute = .album(artist: track.artist, album: album) } label: {
+                                Text(album)
+                            }
                         }
                     }
-                    if track.artist.nonEmpty != nil, track.album.nonEmpty != nil {
-                        Text("·")
-                    }
-                    if let album = track.album.nonEmpty {
-                        Button { app.pendingRoute = .album(artist: track.artist, album: album) } label: {
-                            Text(album)
-                        }
-                    }
+                    .buttonStyle(.plain)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.white.opacity(0.72))
+                    .lineLimit(1)
                 }
-                .buttonStyle(.plain)
-                .font(.subheadline)
-                .foregroundStyle(Color.white.opacity(0.72))
-                .lineLimit(1)
             }
+            .frame(minHeight: 52)
+            TrackInfoLine(trackId: track.id)
+                .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(minHeight: 52)
         .padding(.horizontal, 24)
     }
 
@@ -655,7 +659,7 @@ private struct PlayerScreenLayout: Layout {
         let controlsHeight = sizes.enumerated().reduce(CGFloat.zero) {
             $0 + ($1.offset == 1 ? 0 : $1.element.height)
         }
-        let idealCover = max(1, min(width * 0.76, width - 48, 360))
+        let idealCover = max(1, min(width * 0.82, width - 48, 380))
         let availableCover = viewportHeight - top - bottom - controlsHeight
             - minimumGap * CGFloat(weights.count)
         let cover = min(idealCover, max(140, availableCover))
