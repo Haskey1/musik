@@ -365,14 +365,15 @@ private struct RadioCard: View {
                         .foregroundStyle(Theme.accentBright)
 
                     Text("Твой день.\nТвоя музыка.")
-                        .font(.display(38))
+                        .font(.display(26))
+                        .frame(maxWidth: 180, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
 
                     Text("Любимое и новые открытия — в одном потоке.")
-                        .font(.subheadline)
+                        .font(.footnote)
                         .foregroundStyle(Color.white.opacity(0.76))
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: 230, alignment: .leading)
+                        .frame(maxWidth: 180, alignment: .leading)
 
                     Spacer(minLength: 4)
 

@@ -10,6 +10,7 @@ struct CoverBackdrop: View {
     @State private var image: UIImage?
 
     var body: some View {
+        GeometryReader { geometry in
         ZStack {
             Theme.backdrop
             if let image {
@@ -36,6 +37,9 @@ struct CoverBackdrop: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        .clipped()
         }
         .ignoresSafeArea()
         .animation(.easeInOut(duration: 0.6), value: color)

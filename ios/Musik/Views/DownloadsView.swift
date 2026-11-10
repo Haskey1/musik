@@ -9,6 +9,13 @@ struct DownloadsView: View {
     var body: some View {
         let items = offline.savedTracks
         List {
+            if !items.isEmpty {
+                Text("\(items.count) \(tracksWord(items.count)) · \(formatBytes(offline.totalBytes))")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.muted)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             if !player.networkUp || app.offlineLaunch {
                 Label("Нет связи — доступны только сохранённые треки", systemImage: "wifi.slash")
                     .font(.footnote.weight(.semibold))
@@ -44,11 +51,8 @@ struct DownloadsView: View {
                             }
                             .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
-                }
-            } header: {
-                if !items.isEmpty {
-                    Text("\(items.count) \(tracksWord(items.count)) · \(formatBytes(offline.totalBytes))")
                 }
             }
 
@@ -66,6 +70,8 @@ struct DownloadsView: View {
         .resetScrollOnReselect(tab: 2)
         .scrollContentBackground(.hidden)
         .background(Theme.backdrop)
+        .toolbarBackground(Theme.background, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .navigationTitle("Сохранённые")
     }
 

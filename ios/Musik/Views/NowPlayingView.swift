@@ -83,8 +83,11 @@ struct NowPlayingView: View {
                         .padding(.horizontal, 20)
                         .padding(.top, 8)
                     }
+                    .frame(width: geo.size.width)
                     .padding(.bottom, 32)
                 }
+                .frame(width: geo.size.width)
+                .clipped()
                 .scrollDisabled(swiping)
                 }
                 }

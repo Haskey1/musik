@@ -23,6 +23,7 @@ struct RadioArtistBackdrop: View {
     }
 
     var body: some View {
+        GeometryReader { geometry in
         ZStack {
             LinearGradient(
                 colors: [Color(hex: 0xA94218), Color(hex: 0xD96B2B), Color(hex: 0x486653)],
@@ -39,9 +40,10 @@ struct RadioArtistBackdrop: View {
                 Image(uiImage: artistImage)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
-                    .scaleEffect(1.12, anchor: .bottomTrailing)
-                    .offset(x: 30, y: 12)
+                    .frame(width: geometry.size.width * 0.48, height: geometry.size.height,
+                           alignment: .bottomTrailing)
+                    .frame(width: geometry.size.width, height: geometry.size.height,
+                           alignment: .bottomTrailing)
                     .transition(.opacity)
             } else if let fallbackImage {
                 Image(uiImage: fallbackImage)
@@ -68,6 +70,9 @@ struct RadioArtistBackdrop: View {
                 startPoint: .top,
                 endPoint: .bottom
             )
+        }
+        .frame(width: geometry.size.width, height: geometry.size.height)
+        .clipped()
         }
         .task(id: LoadKey(artistURL: artistURL, fallbackTrackId: fallbackTrackId)) {
             await load()
