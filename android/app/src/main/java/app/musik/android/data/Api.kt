@@ -182,10 +182,13 @@ class Api(private val settings: Settings) {
         }
     }
 
-    fun <T> decode(serializer: KSerializer<T>, text: String): T = try {
-        JsonFormat.decodeFromString(serializer, text)
-    } catch (e: Exception) {
-        throw ApiError(0, "decode", "Неожиданный ответ сервера")
+    suspend fun <T> decode(serializer: KSerializer<T>, text: String): T = withContext(Dispatchers.Default) {
+        try {
+            JsonFormat.decodeFromString(serializer, text)
+        } catch (e: kotlinx.coroutines.CancellationException) { throw e
+        } catch (e: Exception) {
+            throw ApiError(0, "decode", "Неожиданный ответ сервера")
+        }
     }
 
     suspend inline fun <reified T> get(path: String, query: List<Pair<String, String>> = emptyList()): T =
@@ -343,5 +346,6 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     })
     cont.invokeOnCancellation { runCatching { cancel() } }
 }
+
 
 

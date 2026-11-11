@@ -39,6 +39,12 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import app.musik.android.data.CatalogIndex
+import app.musik.android.data.CatalogResults
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,11 +63,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.musik.android.data.AlbumItem
 import app.musik.android.data.ArtistItem
-import app.musik.android.data.FavoritesResponse
 import app.musik.android.data.Track
 import app.musik.android.data.jsonBody
 import app.musik.android.data.nonEmpty
-import app.musik.android.data.SearchMatcher
 import app.musik.android.data.tracksWord
 import app.musik.android.ui.App
 import app.musik.android.ui.StatusBarScrim
@@ -72,66 +76,7 @@ import app.musik.android.ui.LocalNavigator
 import app.musik.android.ui.MusikColors
 import app.musik.android.ui.TrackRow
 import app.musik.android.ui.displayStyle
-import kotlinx.coroutines.async
-import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
-
-class LibraryModel {
-    var tracks by mutableStateOf<List<Track>>(emptyList())
-    var artists by mutableStateOf<List<ArtistItem>>(emptyList())
-    var albums by mutableStateOf<List<AlbumItem>>(emptyList())
-    var favorites by mutableStateOf(FavoritesResponse())
-    var loaded by mutableStateOf(false)
-    var refreshing by mutableStateOf(false)
-    var revision = -1
-
-    suspend fun load() = coroutineScope {
-        val api = App.api
-        val t = async { runCatching { api.library() }.getOrNull() }
-        val ar = async { runCatching { api.artists() }.getOrNull() }
-        val al = async { runCatching { api.albums() }.getOrNull() }
-        val f = async { runCatching { api.favorites() }.getOrNull() }
-        t.await()?.let { tracks = it }
-        // Artists come from the same track list as the Tracks tab (as on the web), so every
-        // artist found there is found here too; the server's list only has indexed tracks.
-        val grouped = groupArtists(tracks)
-        artists = grouped.ifEmpty { ar.await() ?: artists }
-        al.await()?.let { albums = it }
-        f.await()?.let { favorites = it }
-        loaded = true
-    }
-
-    companion object {
-        var shared = LibraryModel()
-            private set
-
-        /** Signed out: the next account starts from an empty screen. */
-        fun reset() {
-            shared = LibraryModel()
-        }
-
-        /** Each credited artist, by number of tracks; the cover is the first track with artwork. */
-        fun groupArtists(tracks: List<Track>): List<ArtistItem> {
-            val by = LinkedHashMap<String, ArtistItem>()
-            val hasArt = HashSet<String>()
-            for (t in tracks) {
-                val names = (t.artists ?: emptyList()).mapNotNull { it.nonEmpty }
-                for (raw in names.ifEmpty { listOf(t.artist.nonEmpty ?: "Unknown") }) {
-                    val name = raw.trim()
-                    val key = name.lowercase()
-                    var item = by[key] ?: ArtistItem(artist = name, tracks = 0, coverTrackId = t.id)
-                    item = item.copy(tracks = (item.tracks ?: 0) + 1)
-                    if (t.artwork != null && key !in hasArt) {
-                        item = item.copy(coverTrackId = t.id)
-                        hasArt.add(key)
-                    }
-                    by[key] = item
-                }
-            }
-            return by.values.sortedWith(compareByDescending<ArtistItem> { it.tracks ?: 0 }.thenBy { it.artist.lowercase() })
-        }
-    }
-}
 
 private val segments = listOf("Все", "Треки", "Артисты", "Альбомы", "Любимое")
 
@@ -144,22 +89,22 @@ fun LibraryScreen() {
     var segment by rememberSaveable { mutableStateOf(1) }
     var query by rememberSaveable { mutableStateOf("") }
 
-    LaunchedEffect(Unit) { if (!model.loaded) model.load() }
+    LaunchedEffect(model) { model.load() }
     LaunchedEffect(state.homeRevision) {
         if (model.loaded && model.revision != state.homeRevision) {
             model.revision = state.homeRevision
-            runCatching { App.api.favorites() }.getOrNull()?.let { model.favorites = it }
+            model.refreshFavorites()
         }
     }
 
     val q = query.trim()
-    fun matches(s: String?) = SearchMatcher.matches(q, s)
-    fun matchesTrack(t: Track) = SearchMatcher.track(q, t)
+    val results by rememberCatalogResults(model.index, q)
+    val favorites by rememberCatalogResults(model.favoriteIndex, q, state.favoriteTracks)
 
     Box(Modifier.fillMaxSize()) {
     PullToRefreshBox(
         isRefreshing = model.refreshing,
-        onRefresh = { scope.launch { model.refreshing = true; model.load(); model.refreshing = false } },
+        onRefresh = { scope.launch { model.refreshing = true; try { model.load(force = true) } finally { model.refreshing = false } } },
         modifier = Modifier.fillMaxSize(),
     ) {
         val listState = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -169,7 +114,7 @@ fun LibraryScreen() {
                 Column(Modifier.statusBarsPadding().padding(top = 12.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Библиотека", style = displayStyle(32))
                     val summary = when (segment) {
-                        1 -> tracksWord(model.tracks.count { matchesTrack(it) })
+                        1 -> tracksWord(results.tracks.size)
                         2 -> "${model.artists.size} артистов"
                         3 -> "${model.albums.size} альбомов"
                         4 -> "Твоя любимая музыка"
@@ -213,15 +158,16 @@ fun LibraryScreen() {
                     }
                 }
             }
-            if (!model.loaded) {
+            if (!model.loaded && model.loading) {
                 item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MusikColors.accent) } }
             }
+            model.error?.let { message -> item("load-error") { EmptyHint(message); MoreButton("Попробовать снова") { scope.launch { model.load(force = true) } } } }
             when (segment) {
-                0 -> allSection(model, q, ::matches, ::matchesTrack) { segment = it }
-                1 -> tracksSection(model.tracks.filter(::matchesTrack), q, model.loaded)
-                2 -> artistsSection(model.artists.filter { matches(it.artist) })
-                3 -> albumsSection(model.albums.filter { matches(it.album) || matches(it.artist) })
-                else -> favoritesSection(model.favorites, ::matches, ::matchesTrack)
+                0 -> allSection(results, q, model.loaded) { segment = it }
+                1 -> tracksSection(results.tracks, q, model.loaded)
+                2 -> artistsSection(results.artists)
+                3 -> albumsSection(results.albums)
+                else -> favoritesSection(favorites)
             }
         }
     }
@@ -230,7 +176,7 @@ fun LibraryScreen() {
 }
 
 private fun LazyListScope.tracksSection(list: List<Track>, query: String, loaded: Boolean) {
-    itemsIndexed(list) { i, t ->
+    itemsIndexed(list, key = { _, t -> "track:${t.id}" }, contentType = { _, _ -> "track" }) { i, t ->
         TrackRow(t, carded = true, showsMenu = true) {
             // Plays the visible list from the tapped row, so playback continues through it.
             val window = list.subList(i, minOf(list.size, i + 500))
@@ -241,7 +187,7 @@ private fun LazyListScope.tracksSection(list: List<Track>, query: String, loaded
 }
 
 private fun LazyListScope.artistsSection(list: List<ArtistItem>) {
-    items(list) { a -> ArtistRow(a) }
+    items(list, key = { "artist:${it.artist}" }, contentType = { "artist" }) { a -> ArtistRow(a) }
 }
 
 @Composable
@@ -263,33 +209,32 @@ private fun ArtistRow(a: ArtistItem) {
 
 /** «Все»: one search over artists, albums and tracks, a short preview of each with a way into its tab. */
 private fun LazyListScope.allSection(
-    model: LibraryModel,
+    results: CatalogResults,
     query: String,
-    matches: (String?) -> Boolean,
-    matchesTrack: (Track) -> Boolean,
+    loaded: Boolean,
     openSegment: (Int) -> Unit,
 ) {
     val searching = query.isNotEmpty()
-    val artists = model.artists.filter { matches(it.artist) }
-    val albums = model.albums.filter { matches(it.album) || matches(it.artist) }
-    val tracks = model.tracks.filter(matchesTrack)
+    val artists = results.artists
+    val albums = results.albums
+    val tracks = results.tracks
     val limit = if (searching) 8 else 5
     val trackLimit = if (searching) 16 else 10
 
     if (artists.isNotEmpty()) {
         item { BigTitle("Артисты") }
-        items(artists.take(limit)) { ArtistRow(it) }
+        items(artists.take(limit), key = { "artist:${it.artist}" }, contentType = { "artist" }) { ArtistRow(it) }
         if (artists.size > limit) item { MoreButton("Все артисты · ${artists.size}") { openSegment(2) } }
     }
     if (albums.isNotEmpty()) {
         item { BigTitle("Альбомы") }
-        items(albums.take(limit)) { AlbumRow(it) }
+        items(albums.take(limit), key = { "album:${it.key}" }, contentType = { "album" }) { AlbumRow(it) }
         if (albums.size > limit) item { MoreButton("Все альбомы · ${albums.size}") { openSegment(3) } }
     }
     if (tracks.isNotEmpty()) {
         item { BigTitle("Треки") }
         val shown = tracks.take(trackLimit)
-        itemsIndexed(shown) { i, t ->
+        itemsIndexed(shown, key = { _, t -> "track:${t.id}" }, contentType = { _, _ -> "track" }) { i, t ->
             TrackRow(t) {
                 // the found tracks of this block, from the tapped one
                 val window = tracks.subList(i, minOf(tracks.size, i + 500))
@@ -298,7 +243,7 @@ private fun LazyListScope.allSection(
         }
         if (tracks.size > trackLimit) item { MoreButton("Все треки · ${tracks.size}") { openSegment(1) } }
     }
-    if (model.loaded && artists.isEmpty() && albums.isEmpty() && tracks.isEmpty()) {
+    if (loaded && artists.isEmpty() && albums.isEmpty() && tracks.isEmpty()) {
         item { EmptyHint(if (searching) "Ничего не найдено" else "Библиотека пуста") }
     }
 }
@@ -320,7 +265,7 @@ private fun MoreButton(text: String, onClick: () -> Unit) {
 }
 
 private fun LazyListScope.albumsSection(list: List<AlbumItem>) {
-    items(list) { a -> AlbumRow(a) }
+    items(list, key = { "album:${it.key}" }, contentType = { "album" }) { a -> AlbumRow(a) }
 }
 
 @Composable
@@ -343,25 +288,30 @@ private fun AlbumRow(a: AlbumItem) {
     }
 }
 
-private fun LazyListScope.favoritesSection(
-    fav: FavoritesResponse,
-    matches: (String?) -> Boolean,
-    matchesTrack: (Track) -> Boolean,
-) {
-    // a heart taken back drops out of the list at once
-    val tracks = (fav.tracks ?: emptyList()).map { it.asTrack() }.filter { it.id in App.state.favoriteTracks }.filter(matchesTrack)
+private fun LazyListScope.favoritesSection(results: CatalogResults) {
     item { SectionTitle("Песни") }
-    items(tracks, key = { it.id }) { t -> TrackRow(t, unlikable = true) { App.player.playMix("favorites", startTrackId = t.id) } }
-    if (tracks.isEmpty()) item { EmptyHint("Жми ♥ на треке") }
+    items(results.tracks, key = { "track:${it.id}" }, contentType = { "track" }) { t ->
+        TrackRow(t, unlikable = true) { App.player.playMix("favorites", startTrackId = t.id) }
+    }
+    if (results.tracks.isEmpty()) item { EmptyHint("Жми ♥ на треке") }
     item { SectionTitle("Артисты") }
-    val artists = (fav.artists ?: emptyList()).filter { matches(it.artist) }
-    artistsSection(artists)
-    if (artists.isEmpty()) item { EmptyHint("Нет любимых артистов") }
+    artistsSection(results.artists)
+    if (results.artists.isEmpty()) item { EmptyHint("Нет любимых артистов") }
     item { SectionTitle("Альбомы") }
-    val albums = (fav.albums ?: emptyList()).filter { matches(it.album) }
-    items(albums) { AlbumRow(it) }
-    if (albums.isEmpty()) item { EmptyHint("Нет любимых альбомов") }
+    albumsSection(results.albums)
+    if (results.albums.isEmpty()) item { EmptyHint("Нет любимых альбомов") }
 }
+
+/** Search runs off the UI thread; rapid input cancels outdated work after a short debounce. */
+@Composable
+private fun rememberCatalogResults(index: CatalogIndex, query: String, favoriteIds: Set<Int>? = null) =
+    produceState(if (query.isBlank()) index.all else CatalogResults(), index, query, favoriteIds) {
+        if (query.isNotBlank()) delay(180)
+        val found = index.search(query)
+        value = if (favoriteIds == null) found else withContext(Dispatchers.Default) {
+            found.copy(tracks = found.tracks.filter { it.id in favoriteIds })
+        }
+    }
 
 @Composable
 private fun SectionTitle(text: String) {
@@ -375,15 +325,13 @@ fun SearchScreen() {
     val nav = LocalNavigator.current
     var segment by rememberSaveable { mutableStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
-    LaunchedEffect(Unit) {
-        if (!model.loaded) model.load()
-    }
+    LaunchedEffect(model) { model.load() }
+    val scope = rememberCoroutineScope()
     val requester = remember { androidx.compose.ui.focus.FocusRequester() }
     LaunchedEffect(Unit) { runCatching { requester.requestFocus() } }
 
     val q = query.trim()
-    fun matches(s: String?) = SearchMatcher.matches(q, s)
-    fun matchesTrack(t: Track) = SearchMatcher.track(q, t)
+    val results by rememberCatalogResults(model.index, q)
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp)) {
         item {
@@ -416,16 +364,20 @@ fun SearchScreen() {
                 )
             }
         }
-        if (!model.loaded) {
+        if (!model.loaded && model.loading) {
             item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = MusikColors.accent) } }
         }
-        when (segment) {
-            0 -> allSection(model, q, ::matches, ::matchesTrack) { segment = it }
-            1 -> tracksSection(model.tracks.filter(::matchesTrack), q, model.loaded)
-            2 -> artistsSection(model.artists.filter { matches(it.artist) })
-            else -> albumsSection(model.albums.filter { matches(it.album) || matches(it.artist) })
+        model.error?.let { message -> item("load-error") { EmptyHint(message); MoreButton("Попробовать снова") { scope.launch { model.load(force = true) } } } }
+        if (q.isEmpty()) {
+            item("search-hint") { EmptyHint("Ищи по трекам, артистам и альбомам сразу") }
+        } else when (segment) {
+            0 -> allSection(results, q, model.loaded) { segment = it }
+            1 -> tracksSection(results.tracks, q, model.loaded)
+            2 -> artistsSection(results.artists)
+            else -> albumsSection(results.albums)
         }
     }
 }
+
 
 

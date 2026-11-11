@@ -64,7 +64,7 @@ import app.musik.android.data.formatTime
 import app.musik.android.data.jsonBody
 import app.musik.android.data.nonEmpty
 import app.musik.android.playback.PlayerController
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
 val App: MusikApp get() = MusikApp.instance
@@ -84,16 +84,27 @@ fun Artwork(
 ) {
     val offline = App.offline
     @Suppress("UNUSED_VARIABLE") val rev = offline.artworkRevision
-    val model: Any? = photo
-        ?: trackId?.let { id -> offline.artworkFile(id) ?: App.api.artworkUrl(id, size) }
+    val server = App.settings.baseUrl
+    val saved = trackId?.let { offline.isSaved(it) } ?: false
+    val model: Any? = remember(photo, trackId, size, rev, server, saved) {
+        photo ?: trackId?.let { id ->
+            (if (saved) offline.artworkFile(id) else null) ?: App.api.artworkUrl(id, size)
+        }
+    }
+    val context = LocalContext.current
+    val request = remember(context, model, size) {
+        ImageRequest.Builder(context).data(model).size(size).build()
+    }
+    var loaded by remember(model, size) { mutableStateOf(false) }
     Box(modifier.clip(shape)) {
-        SubcomposeAsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(model).size(size).build(),
+        if (!loaded) Placeholder(trackId ?: fallback.hashCode(), fallback)
+        AsyncImage(
+            model = request,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
-            loading = { Placeholder(trackId ?: fallback.hashCode(), fallback) },
-            error = { Placeholder(trackId ?: fallback.hashCode(), fallback) },
+            onSuccess = { loaded = true },
+            onError = { loaded = false },
         )
     }
 }
@@ -292,6 +303,7 @@ fun TrackRow(
 /** Long-press menu of a track, shared by every list. */
 @Composable
 fun TrackMenu(track: Track, expanded: Boolean, onDismiss: () -> Unit) {
+    if (!expanded) return
     val state = App.state
     val player = App.player
     val offline = App.offline
@@ -342,4 +354,5 @@ fun FavoriteMark(on: Boolean, tint: Color = MusikColors.accent) {
 
 @Composable
 fun Gap(h: Dp) = Spacer(Modifier.size(h))
+
 
