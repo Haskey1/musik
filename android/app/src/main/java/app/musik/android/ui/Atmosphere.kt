@@ -1,5 +1,6 @@
 package app.musik.android.ui
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -30,7 +31,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
 
 /** Already soft pixels render consistently on every supported Android version. */
 @Composable
@@ -82,22 +82,36 @@ fun CoverBackdrop(trackId: Int) {
 @Composable
 fun RadioArtistBackdrop(artist: String?, fallbackTrackId: Int?, modifier: Modifier = Modifier) {
     val photo = App.state.photos.fullUrl(App.api, artist)
+    val context = LocalContext.current.applicationContext
+    val cutout by produceState<Bitmap?>(null, photo) {
+        value = null
+        value = photo?.let { ArtistCutouts.load(context, it) }
+    }
+    val portrait = remember(cutout) { cutout?.asImageBitmap() }
+    val portraitAlpha by animateFloatAsState(if (portrait != null) 1f else 0f, tween(350), label = "person")
     BoxWithConstraints(modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFFA94218), Color(0xFFD96B2B), Color(0xFF486653))))) {
-        if (photo != null) {
-            AsyncImage(model = photo, contentDescription = null, contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxHeight().fillMaxWidth(0.76f).align(Alignment.BottomEnd)
+        if (portrait != null) {
+            Image(bitmap = portrait, contentDescription = null, contentScale = ContentScale.Fit,
+                alignment = Alignment.BottomEnd,
+                modifier = Modifier.fillMaxHeight().fillMaxWidth(0.76f).align(Alignment.BottomEnd).alpha(portraitAlpha)
                     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
                     .drawWithContent {
                         drawContent()
-                        drawRect(Brush.horizontalGradient(listOf(Color.Transparent, Color.White, Color.White)), blendMode = BlendMode.DstIn)
-                        drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.White, Color.White, Color.Transparent)), blendMode = BlendMode.DstIn)
+                        drawRect(Brush.horizontalGradient(0f to Color.Transparent, 0.22f to Color.White, 0.9f to Color.White, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
+                        drawRect(Brush.verticalGradient(0f to Color.Transparent, 0.15f to Color.White, 0.88f to Color.White, 1f to Color.Transparent), blendMode = BlendMode.DstIn)
                     })
         } else if (fallbackTrackId != null) {
             AmbientArtwork(fallbackTrackId, Modifier.fillMaxSize().alpha(0.35f))
         }
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Color.Black.copy(alpha = 0.46f), Color.Black.copy(alpha = 0.22f), Color.Transparent))))
-        HazeTexture(Modifier.fillMaxSize().alpha(0.65f))
+        HazeTexture(Modifier.fillMaxSize().alpha(0.65f)
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(Brush.verticalGradient(listOf(Color.Transparent, Color.White)), blendMode = BlendMode.DstIn)
+            })
         Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent, Color.Black.copy(alpha = 0.42f)))))
     }
 }
+
 
