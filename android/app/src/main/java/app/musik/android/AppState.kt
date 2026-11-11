@@ -110,6 +110,7 @@ class AppState(
 
     suspend fun login(baseUrl: String, mode: LoginMode, username: String, secret: String) {
         settings.baseUrl = baseUrl
+        settings.restartManagedConnection()
         val password = secret.trim()
         val user = username.trim().nonEmpty
         settings.token = null
@@ -244,3 +245,4 @@ class AppState(
         }
     }
 }
+

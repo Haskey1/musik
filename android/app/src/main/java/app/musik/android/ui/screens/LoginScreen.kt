@@ -27,6 +27,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -129,7 +130,10 @@ fun LoginScreen(state: AppState) {
             Field("Токен устройства", secret, { secret = it }, "из аккаунта на сайте", KeyboardType.Password, secure = true, onDone = ::submit)
         }
 
-        error?.let { Text(it, color = Color(0xFFFF6B6B), style = MaterialTheme.typography.bodySmall) }
+        error?.let {
+            Text(it, color = Color(0xFFFF6B6B), style = MaterialTheme.typography.bodySmall)
+            if (!advanced) TextButton(onClick = { advanced = true }) { Text("Проверить адрес сервера") }
+        }
 
         PrimaryButton(
             onClick = ::submit,
@@ -187,3 +191,4 @@ private fun Field(
         )
     }
 }
+

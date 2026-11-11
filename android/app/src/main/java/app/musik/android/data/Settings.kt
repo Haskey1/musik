@@ -39,13 +39,12 @@ class Settings(
         val legacy = prefs.getString("baseUrl", null)?.let(::normalize).orEmpty()
         if (legacy.isNotEmpty()) {
             val editor = prefs.edit().remove("baseUrl")
-            if (legacy in builtInServers) {
-                if (customServer == null) editor.putString("activeBuiltInUrl", legacy)
-            } else if (prefs.getString("customBaseUrl", null) == null) {
+            if (legacy !in builtInServers && prefs.getString("customBaseUrl", null) == null) {
                 editor.putString("customBaseUrl", legacy)
             }
             editor.apply()
         }
+        prefs.edit().remove("activeBuiltInUrl").apply()
     }
 
     private val customServer: String?
@@ -54,9 +53,14 @@ class Settings(
     val hasCustomServer: Boolean
         get() = customServer != null
 
-    private val activeBuiltInUrl: String
-        get() = prefs.getString("activeBuiltInUrl", null)?.let(::normalize)
-            ?.takeIf { it in builtInServers } ?: primary
+    // A failed CDN must not remain the only server across app restarts.
+    @Volatile private var activeBuiltInUrl: String = primary
+
+    /** A new explicit sign-in tries the primary again, then its configured fallback. */
+    @Synchronized
+    fun restartManagedConnection() {
+        if (!hasCustomServer) activeBuiltInUrl = primary
+    }
 
     var baseUrl: String
         get() = customServer ?: activeBuiltInUrl
@@ -65,7 +69,7 @@ class Settings(
             val editor = prefs.edit().remove("baseUrl")
             if (url.isEmpty() || url in builtInServers) {
                 editor.remove("customBaseUrl")
-                if (url.isNotEmpty()) editor.putString("activeBuiltInUrl", url)
+                if (url.isNotEmpty()) activeBuiltInUrl = url
             } else {
                 editor.putString("customBaseUrl", url)
             }
@@ -77,7 +81,7 @@ class Settings(
     fun fallbackAfterFailure(failedBase: String): String? {
         if (hasCustomServer || primary.isEmpty() || fallback.isEmpty() || primary == fallback) return null
         if (normalize(failedBase) != primary) return null
-        if (baseUrl != fallback) prefs.edit().putString("activeBuiltInUrl", fallback).apply()
+        activeBuiltInUrl = fallback
         return fallback
     }
 
@@ -141,3 +145,4 @@ class Settings(
     fun getBoolean(key: String, def: Boolean) = prefs.getBoolean(key, def)
     fun putBoolean(key: String, value: Boolean) = prefs.edit().putBoolean(key, value).apply()
 }
+

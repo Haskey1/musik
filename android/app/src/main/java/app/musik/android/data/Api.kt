@@ -173,7 +173,7 @@ class Api(private val settings: Settings) {
                 }
             } catch (e: IOException) {
                 base = settings.fallbackAfterFailure(base)
-                    ?: throw ApiError(0, "network", describe(e))
+                    ?: throw ApiError(0, "network", connectionFailureMessage(e, url(base, path, query).host))
             } catch (e: ApiError) {
                 // A gateway/CDN error on the primary is as unavailable as a connection failure.
                 if (e.status !in setOf(502, 503, 504)) throw e
@@ -193,13 +193,6 @@ class Api(private val settings: Settings) {
 
     suspend inline fun <reified T> post(path: String, body: JsonElement? = null): T =
         decode(serializer<T>(), send("POST", path, body = body))
-
-    private fun describe(e: IOException): String = when (e) {
-        is UnknownHostException -> "Не удаётся найти сервер"
-        is ConnectException -> "Не удаётся подключиться к серверу"
-        is SocketTimeoutException -> "Сервер не отвечает"
-        else -> if (e.message?.contains("Canceled", true) == true) "Отменено" else "Нет сети"
-    }
 
     // MARK: Auth & status
 
@@ -350,4 +343,5 @@ suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
     })
     cont.invokeOnCancellation { runCatching { cancel() } }
 }
+
 

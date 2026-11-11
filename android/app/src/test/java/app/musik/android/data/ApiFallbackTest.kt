@@ -78,8 +78,42 @@ class ApiFallbackTest {
         assertEquals(0, fallback.requestCount)
     }
 
+    @Test
+    fun unavailableFallbackIsNotPersistedAcrossAppRestarts() {
+        val primary = "https://music.example.com"
+        val fallback = "https://cdn.example.com"
+        val settings = Settings(context, primary, fallback)
+        settings.fallbackAfterFailure(primary)
+        assertEquals(fallback, settings.baseUrl)
+        assertEquals(primary, Settings(context, primary, fallback).baseUrl)
+    }
+
+    @Test
+    fun explicitSignInCanRecoverFromPreviouslyFailedFallback() = runBlocking {
+        val primary = server()
+        val fallback = server()
+        val settings = Settings(context, primary.url("/").toString(), fallback.url("/").toString())
+        settings.fallbackAfterFailure(settings.baseUrl)
+        settings.restartManagedConnection()
+        primary.enqueue(MockResponse().setBody("""{"token":"device-token"}"""))
+        val token = Api(settings).issueToken("admin", "secret", "test")
+        assertEquals("device-token", token)
+        assertEquals(1, primary.requestCount)
+        assertEquals(0, fallback.requestCount)
+    }
+
+    @Test
+    fun retryDoesNotChangeCustomServer() {
+        val settings = Settings(context, "https://primary.example.com", "https://cdn.example.com")
+        settings.baseUrl = "https://custom.example.com"
+        settings.restartManagedConnection()
+        assertEquals("https://custom.example.com", settings.baseUrl)
+        assertTrue(settings.hasCustomServer)
+    }
+
     private fun server(): MockWebServer = MockWebServer().also {
         it.start()
         servers += it
     }
 }
+
