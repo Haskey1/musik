@@ -23,7 +23,8 @@ func TestAdvanceNeverRepeatsCurrentTrack(t *testing.T) {
 }
 
 func TestTrackStartDropsStartedTrackFromRadioQueue(t *testing.T) {
-	engine := testEngine(t)
+	// Lifecycle events reference real track rows through foreign keys.
+	engine := anchoredEngine(t)
 	sess := engine.NewSession("radio")
 	sess.Lock()
 	defer sess.Unlock()

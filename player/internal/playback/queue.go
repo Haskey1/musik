@@ -50,7 +50,7 @@ func (e *Engine) dropFromQueue(sess *Session, trackID int64) {
 }
 
 func (e *Engine) SeedRadioExclude(sess *Session) {
-	ids, err := e.Store.RecentTrackIDs(48, 120)
+	ids, err := e.Store.RecentTrackIDs(48, max(120, e.Idx.Size()))
 	if err != nil {
 		return
 	}
@@ -60,6 +60,7 @@ func (e *Engine) SeedRadioExclude(sess *Session) {
 }
 
 func (e *Engine) PickStart(sess *Session, seed *int64) int64 {
+	e.excludeRuleTargets(sess)
 	var startID int64
 	if seed != nil {
 		startID = *seed
@@ -105,9 +106,11 @@ func (e *Engine) pickTasteStart(sess *Session) int64 {
 		return 0
 	}
 	recent := map[int64]bool{}
-	if ids, err := e.Store.RecentTrackIDs(36, 50); err == nil {
+	if ids, err := e.Store.RecentTrackIDs(48, max(120, n)); err == nil {
 		for _, id := range ids {
-			recent[id] = true
+			for _, cloneID := range e.Idx.CloneIDs(id) {
+				recent[cloneID] = true
+			}
 		}
 	}
 	for id := range sess.Exclude {
@@ -128,40 +131,26 @@ func (e *Engine) pickTasteStart(sess *Session) int64 {
 	if sess.MoodPreset != "" {
 		k = 80
 	}
-	top := e.Idx.TopK(e.tasteForQueue(sess), k, nil)
+	top := e.Idx.TopK(e.tasteForQueue(sess), k, recent)
 	if len(top) == 0 {
 		return e.Builder.PickRandom(recent)
 	}
 	candidates := make([]pair, 0, len(top))
 	for _, p := range top {
 		meta := e.Idx.MetaAt(p.Row)
-		id := meta.ID
 		sim := p.Score + float32(0.75*queue.MoodPresetScore(meta, sess.MoodPreset))
-		if recent[id] {
-			sim -= 0.35
-		}
 		candidates = append(candidates, pair{p.Row, sim})
-	}
-	allRecent := true
-	for _, p := range candidates {
-		if !recent[e.Idx.MetaAt(p.row).ID] {
-			allRecent = false
-			break
-		}
-	}
-	if allRecent {
-		candidates = candidates[:0]
-		for _, p := range top {
-			meta := e.Idx.MetaAt(p.Row)
-			sim := p.Score + float32(0.75*queue.MoodPresetScore(meta, sess.MoodPreset))
-			candidates = append(candidates, pair{p.Row, sim})
-		}
 	}
 
 	const temp = 0.08
 	weights := make([]float64, len(candidates))
 	var sum float64
 	maxSim := candidates[0].sim
+	for _, p := range candidates {
+		if p.sim > maxSim {
+			maxSim = p.sim
+		}
+	}
 	for i, p := range candidates {
 		w := math.Exp(float64(p.sim-maxSim) / temp)
 		weights[i] = w
@@ -342,7 +331,7 @@ func (e *Engine) RefreshQueue(sess *Session, currentID int64, reason string) {
 		},
 		DaypartName: dp, ContextIDs: sess.ActiveContextIDs,
 		Discover: e.Discovering(), Allocation: &decision,
-		MoodPreset: sess.MoodPreset,
+		MoodPreset:        sess.MoodPreset,
 		LearnedTransition: e.learnedTransition(),
 	})
 	if reason != "" && sess.Mode != "share" {

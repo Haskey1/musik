@@ -154,11 +154,11 @@ func CollectCandidates(idx *index.Index, currentID int64, opts CandidateOpts) []
 			rows = append(rows, row)
 		}
 	}
-	addRows(topK(exploitScore, pool, allow))
+	addRows(topArtistRows(idx, exploitScore, pool, allow))
 	addRows(transitionRows(idx, currentMeta, currentSim, opts.Transitions, pool, allow))
 	addRows(resurfaceRows(idx, opts.Now, pool, allow))
 	addRows(newInLibraryRows(idx, opts.Now, pool, allow))
-	addRows(adjacentRows(tasteSim, pool, allow))
+	addRows(adjacentRows(idx, tasteSim, pool, allow))
 	addRows(wildcardRows(idx, tasteSim, byKind["far"], opts.Negative, pool, allow))
 
 	out := make([]Candidate, 0, len(rows))
@@ -228,7 +228,7 @@ func newInLibraryEligible(meta index.Meta, now time.Time) bool {
 }
 
 func transitionRows(idx *index.Index, current *index.Meta, currentSim []float32, edges map[int64]float64, pool int, allow func(int) bool) []int {
-	rows := topK(currentSim, pool, allow)
+	rows := topArtistRows(idx, currentSim, pool, allow)
 	seen := map[int]bool{}
 	for _, row := range rows {
 		seen[row] = true
@@ -249,7 +249,7 @@ func transitionRows(idx *index.Index, current *index.Meta, currentSim []float32,
 			}
 			window[row] = -2
 		}
-		for _, row := range topK(window, pool, func(row int) bool { return window[row] > -1.5 }) {
+		for _, row := range topArtistRows(idx, window, pool, func(row int) bool { return window[row] > -1.5 }) {
 			if !seen[row] {
 				seen[row] = true
 				rows = append(rows, row)
@@ -277,12 +277,11 @@ func transitionRows(idx *index.Index, current *index.Meta, currentSim []float32,
 		}
 		return ranked[i].w > ranked[j].w
 	})
-	if len(ranked) > pool {
-		ranked = ranked[:pool]
+	edgeRows := make([]int, len(ranked))
+	for i, item := range ranked {
+		edgeRows[i] = item.row
 	}
-	for _, item := range ranked {
-		rows = append(rows, item.row)
-	}
+	rows = append(rows, balanceArtistRows(idx, edgeRows, pool)...)
 	return rows
 }
 
@@ -311,14 +310,11 @@ func resurfaceRows(idx *index.Index, now time.Time, pool int, allow func(int) bo
 		}
 		return hits[a].row < hits[b].row
 	})
-	if len(hits) > pool {
-		hits = hits[:pool]
-	}
 	rows := make([]int, len(hits))
 	for i, h := range hits {
 		rows[i] = h.row
 	}
-	return rows
+	return balanceArtistRows(idx, rows, pool)
 }
 
 func newInLibraryRows(idx *index.Index, now time.Time, pool int, allow func(int) bool) []int {
@@ -343,17 +339,14 @@ func newInLibraryRows(idx *index.Index, now time.Time, pool int, allow func(int)
 		}
 		return hits[a].row < hits[b].row
 	})
-	if len(hits) > pool {
-		hits = hits[:pool]
-	}
 	rows := make([]int, len(hits))
 	for i, h := range hits {
 		rows[i] = h.row
 	}
-	return rows
+	return balanceArtistRows(idx, rows, pool)
 }
 
-func adjacentRows(taste []float32, pool int, allow func(int) bool) []int {
+func adjacentRows(idx *index.Index, taste []float32, pool int, allow func(int) bool) []int {
 	lo := float32(ActiveSpec.Thresholds.AdjacentTaste)
 	hi := float32(ActiveSpec.Thresholds.ExploitTaste)
 	score := make([]float32, len(taste))
@@ -364,7 +357,7 @@ func adjacentRows(taste []float32, pool int, allow func(int) bool) []int {
 		}
 		score[row] = -2
 	}
-	return topK(score, pool, func(row int) bool { return score[row] > -1.5 })
+	return topArtistRows(idx, score, pool, func(row int) bool { return score[row] > -1.5 })
 }
 
 func wildcardRows(idx *index.Index, taste, far []float32, negative func([]float32) float64, pool int, allow func(int) bool) []int {
@@ -381,7 +374,7 @@ func wildcardRows(idx *index.Index, taste, far []float32, negative func([]float3
 		}
 		score[row] = simAt(far, row) - simAt(taste, row)
 	}
-	return topK(score, pool, func(row int) bool { return score[row] > -1.5 })
+	return topArtistRows(idx, score, pool, func(row int) bool { return score[row] > -1.5 })
 }
 
 func farCentroid(centroids [][]float32, taste []float32) []float32 {
@@ -401,6 +394,47 @@ func farCentroid(centroids [][]float32, taste []float32) []float32 {
 		}
 	}
 	return centroids[bestI]
+}
+
+// Source pools must be balanced before truncation: a large discography can
+// otherwise occupy all 48 slots before the queue's artist limit is applied.
+// Keep several options per artist for scoring/transitions; only backfill from
+// the overflow when there are too few other eligible artists in this source.
+const sourceArtistLimit = 4
+
+func topArtistRows(idx *index.Index, score []float32, k int, allow func(int) bool) []int {
+	return balanceArtistRows(idx, topK(score, len(score), allow), k)
+}
+
+func balanceArtistRows(idx *index.Index, ranked []int, k int) []int {
+	if k <= 0 {
+		return nil
+	}
+	k = min(k, len(ranked))
+	out := make([]int, 0, k)
+	counts := map[string]int{}
+	deferred := make([]int, 0)
+	for _, row := range ranked {
+		meta := idx.MetaAt(row)
+		artist := index.ArtistKey(meta.Artist)
+		// Missing artist tags are not evidence that two tracks share an artist.
+		if artist != "" && counts[artist] >= sourceArtistLimit {
+			deferred = append(deferred, row)
+			continue
+		}
+		counts[artist]++
+		out = append(out, row)
+		if len(out) == k {
+			return out
+		}
+	}
+	for _, row := range deferred {
+		if len(out) == k {
+			break
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func topK(score []float32, k int, allow func(int) bool) []int {

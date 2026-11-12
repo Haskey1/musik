@@ -55,7 +55,8 @@ func (b *Builder) RandomFloat64() float64 {
 	return b.newRNG().Float64()
 }
 
-// PickRandom returns a random track id not in exclude.
+// PickRandom chooses an eligible artist uniformly, then one of their tracks.
+// A large discography must not dominate cold starts and random refills.
 // It returns 0 when the catalog is empty or every track is excluded.
 // Callers stop playback or explicitly relax the exclude; this function does not.
 func (b *Builder) PickRandom(exclude map[int64]bool) int64 {
@@ -63,15 +64,26 @@ func (b *Builder) PickRandom(exclude map[int64]bool) int64 {
 	if n == 0 {
 		return 0
 	}
-	allowed := make([]int64, 0, n)
+	artists := make([]string, 0)
+	byArtist := map[string][]int64{}
 	for i := 0; i < n; i++ {
-		id := b.Idx.MetaAt(i).ID
-		if !exclude[id] {
-			allowed = append(allowed, id)
+		meta := b.Idx.MetaAt(i)
+		if exclude[meta.ID] {
+			continue
 		}
+		key := index.ArtistKey(meta.Artist)
+		if key == "" {
+			key = "\x00" + index.TrackKey(meta.ID)
+		}
+		if _, ok := byArtist[key]; !ok {
+			artists = append(artists, key)
+		}
+		byArtist[key] = append(byArtist[key], meta.ID)
 	}
-	if len(allowed) == 0 {
+	if len(artists) == 0 {
 		return 0
 	}
-	return allowed[b.newRNG().Intn(len(allowed))]
+	rng := b.newRNG()
+	tracks := byArtist[artists[rng.Intn(len(artists))]]
+	return tracks[rng.Intn(len(tracks))]
 }

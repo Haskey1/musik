@@ -2,7 +2,6 @@ package queue
 
 import (
 	"math"
-	"strings"
 
 	"github.com/torwin-job/musik/player/internal/index"
 )
@@ -106,7 +105,7 @@ func Select(cands []ScoredCandidate, opts SelectOpts) []ScoredCandidate {
 			return !used[c.Row]
 		}
 		meta := opts.Idx.MetaAt(c.Row)
-		if artistCount[strings.ToLower(meta.Artist)] >= opts.ArtistLimit {
+		if artistCount[index.ArtistKey(meta.Artist)] >= opts.ArtistLimit {
 			return false
 		}
 		if meta.FileMD5 != "" && usedMD5[meta.FileMD5] {
@@ -123,7 +122,7 @@ func Select(cands []ScoredCandidate, opts SelectOpts) []ScoredCandidate {
 			return
 		}
 		meta := opts.Idx.MetaAt(c.Row)
-		artistCount[strings.ToLower(meta.Artist)]++
+		artistCount[index.ArtistKey(meta.Artist)]++
 		if meta.FileMD5 != "" {
 			usedMD5[meta.FileMD5] = true
 		}
@@ -149,14 +148,17 @@ func Select(cands []ScoredCandidate, opts SelectOpts) []ScoredCandidate {
 	for i := len(sourcePriority) - 1; i >= 0; i-- {
 		src := sourcePriority[i]
 		want := quotas[src].Min
-		for _, c := range byLabel[src] {
-			if len(selected) >= opts.Size || counts[src] >= want {
+		for len(selected) < opts.Size && counts[src] < want {
+			eligible := make([]ScoredCandidate, 0, len(byLabel[src]))
+			for _, c := range byLabel[src] {
+				if canTake(c) {
+					eligible = append(eligible, c)
+				}
+			}
+			taken, ok := mmrPick(eligible, selected, opts)
+			if !ok {
 				break
 			}
-			if !canTake(c) {
-				continue
-			}
-			taken := c
 			taken.Primary = src
 			selected = append(selected, taken)
 			mark(taken)
@@ -221,50 +223,52 @@ func MMRSelect(cands []ScoredCandidate, idx *index.Index, size int, lambda float
 		}
 		remaining = append(remaining, c)
 	}
-	artistCount := map[string]int{}
 	for len(selected) < size && len(remaining) > 0 {
-		bestI, bestScore := -1, -1e9
-		for i, c := range remaining {
-			rel := c.Score
-			div := 0.0
-			if idx != nil && len(selected) > 0 {
-				vec := idx.Vector(c.Row)
-				for _, s := range selected {
-					sim := float64(dot32(vec, idx.Vector(s.Row)))
-					if sim > div {
-						div = sim
-					}
-				}
-			}
-			artist := ""
-			if idx != nil {
-				artist = strings.ToLower(idx.MetaAt(c.Row).Artist)
-			}
-			score := lambda*rel - (1-lambda)*div - ActiveSpec.ArtistPenalty*float64(artistCount[artist])
-			if score > bestScore {
-				bestScore = score
-				bestI = i
-			}
-		}
-		if bestI < 0 {
+		chosen, ok := mmrPick(remaining, selected, SelectOpts{Idx: idx, MMRLambda: lambda})
+		if !ok {
 			break
 		}
-		chosen := remaining[bestI]
 		selected = append(selected, chosen)
-		if idx != nil {
-			artistCount[strings.ToLower(idx.MetaAt(chosen.Row).Artist)]++
-		}
-		remaining = append(remaining[:bestI], remaining[bestI+1:]...)
+		remaining = remainingCandidates(remaining, map[int]bool{chosen.Row: true})
 	}
 	return selected
 }
 
+// Score each remaining candidate against the entire selection, including tracks
+// already used to satisfy source minimums. Restarting MMR with size=1 loses this
+// context and silently reduces diversity selection to a score-only sort.
 func mmrPick(remaining, selected []ScoredCandidate, opts SelectOpts) (ScoredCandidate, bool) {
-	picked := MMRSelect(remaining, opts.Idx, 1, opts.MMRLambda, nil)
-	if len(picked) == 0 {
+	lambda := opts.MMRLambda
+	if lambda <= 0 {
+		lambda = ActiveSpec.MMRLambda
+	}
+	artistCount := map[string]int{}
+	vectors := make([][]float32, 0, len(selected))
+	if opts.Idx != nil {
+		for _, s := range selected {
+			artistCount[index.ArtistKey(opts.Idx.MetaAt(s.Row).Artist)]++
+			vectors = append(vectors, opts.Idx.Vector(s.Row))
+		}
+	}
+	bestI, bestScore := -1, math.Inf(-1)
+	for i, c := range remaining {
+		div, repeats := 0.0, 0
+		if opts.Idx != nil && len(selected) > 0 {
+			vec := opts.Idx.Vector(c.Row)
+			for _, selectedVector := range vectors {
+				div = math.Max(div, float64(dot32(vec, selectedVector)))
+			}
+			repeats = artistCount[index.ArtistKey(opts.Idx.MetaAt(c.Row).Artist)]
+		}
+		score := lambda*c.Score - (1-lambda)*div - ActiveSpec.ArtistPenalty*float64(repeats)
+		if score > bestScore || (score == bestScore && bestI >= 0 && c.TrackID < remaining[bestI].TrackID) {
+			bestI, bestScore = i, score
+		}
+	}
+	if bestI < 0 {
 		return ScoredCandidate{}, false
 	}
-	return picked[0], true
+	return remaining[bestI], true
 }
 
 func remainingCandidates(cands []ScoredCandidate, used map[int]bool) []ScoredCandidate {

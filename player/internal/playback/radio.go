@@ -197,12 +197,8 @@ func (e *Engine) pickAnchoredStart(sess *Session, seed *int64) int64 {
 	}
 	rows := e.anchorRows(sess.Anchor)
 	eval := e.sessionRules(sess)
-	var fallback int64
 	for _, row := range rows {
 		id := e.Idx.MetaAt(row).ID
-		if fallback == 0 {
-			fallback = id
-		}
 		if sess.Exclude[id] {
 			continue
 		}
@@ -210,9 +206,6 @@ func (e *Engine) pickAnchoredStart(sess *Session, seed *int64) int64 {
 			continue
 		}
 		return id
-	}
-	if fallback != 0 {
-		return fallback
 	}
 	return e.pickAllowedStart(sess, nil)
 }
