@@ -191,7 +191,7 @@ func credentialPost(route routeDescriptor) bool {
 // deviceMayCall blocks admin routes and account management. A phone can
 // still enqueue its own mix_pack and read that job; profile routes stay open.
 func deviceMayCall(route routeDescriptor, r *http.Request) bool {
-	if jobDeviceException(route, r) {
+	if route.path == "/api/year-recap/availability" || jobDeviceException(route, r) {
 		return true
 	}
 	return route.scope != scopeAdmin && route.scope != scopeUser

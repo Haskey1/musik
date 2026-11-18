@@ -100,6 +100,7 @@ func main() {
 		}
 	}()
 	srv.WatchJobs()
+	srv.StartRecapBot(context.Background())
 
 	if cfg.MultiUser {
 		log.Printf("multi-user authentication enabled (local accounts, OIDC=%v)", cfg.OIDCIssuer != "")

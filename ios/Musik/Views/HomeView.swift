@@ -18,6 +18,8 @@ struct HomeView: View {
     @State private var loaded = false
     @State private var refreshingMixes = false
     @State private var showSearch = false
+    @State private var recapAvailability: RecapAvailability?
+    @State private var showRecap = false
 
     var body: some View {
         ScrollView {
@@ -31,6 +33,7 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .refreshable {
+            await loadRecapAvailability()
             await app.refreshArtistPhotos(force: true)
             await load()
         }
@@ -38,6 +41,10 @@ struct HomeView: View {
         .onChange(of: app.homeRevision) { _ in Task { await loadFavorites() } }
         // the app was opened without a connection: fill the screen once the server is back
         .onChange(of: app.offlineLaunch) { offline in if !offline { Task { await load() } } }
+        .task(id: app.offlineLaunch) { await loadRecapAvailability() }
+        .fullScreenCover(isPresented: $showRecap, onDismiss: {
+            Task { await loadRecapAvailability() }
+        }) { YearRecapView() }
         .navigationBarHidden(true)
         .sheet(isPresented: $showSearch) {
             NavigationStack {
@@ -85,10 +92,18 @@ struct HomeView: View {
                 .accessibilityLabel("Поиск")
                 .buttonStyle(.plain)
             }
+            if let availability = recapAvailability, availability.available {
+                YearRecapBanner(year: availability.year) { showRecap = true }
+            }
             RadioCard(heroArtist: heroArtist, fallbackTrackId: heroTrackId)
         }
         .padding(.horizontal, 16)
         .padding(.top, 12)
+    }
+
+    private func loadRecapAvailability() async {
+        guard !app.offlineLaunch else { recapAvailability = nil; return }
+        recapAvailability = try? await app.api.get("/api/year-recap/availability")
     }
 
     private var greeting: String {

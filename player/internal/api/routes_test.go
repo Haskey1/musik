@@ -15,6 +15,7 @@ import (
 
 func TestRouteScopesAreExplicit(t *testing.T) {
 	nonProfile := map[string]routeScope{
+		"GET /api/year-recap/availability":             scopeUser,
 		"GET /api/health":                              scopePublic,
 		"GET /api/themes":                              scopePublic,
 		"GET /api/openapi.json":                        scopePublic,

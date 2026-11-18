@@ -445,6 +445,62 @@
     }
   ],
   "paths": {
+  "/api/year-recap/availability": {
+    "get": {
+      "summary": "Check access to the mobile year recap",
+      "tags": [
+        "metrics"
+      ],
+      "responses": {
+        "200": {
+          "description": "Availability for the signed-in account and recap year."
+        }
+      }
+    }
+  },
+  "/api/year-recap": {
+    "get": {
+      "summary": "Read the personal mobile year recap",
+      "tags": [
+        "metrics"
+      ],
+      "responses": {
+        "200": {
+          "description": "Profile listening totals, top tracks, top artists and the top artist’s most played track."
+        },
+        "404": {
+          "description": "Recap or track unavailable."
+        }
+      }
+    }
+  },
+  "/api/year-recap/clips/{id}": {
+    "get": {
+      "summary": "Read a short excerpt for the mobile year recap",
+      "tags": [
+        "metrics"
+      ],
+      "responses": {
+        "200": {
+          "description": "JSON containing the base64-encoded MP3 excerpt for an eligible track."
+        },
+        "404": {
+          "description": "Recap or track unavailable."
+        }
+      },
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      ]
+    }
+  },
     "/api/metrics/listening/summary": {
       "get": {
         "summary": "Personal listening totals for the last seven days and current UTC calendar year",

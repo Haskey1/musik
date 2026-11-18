@@ -183,6 +183,23 @@ fun HomeScreen() {
     val nav = LocalNavigator.current
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var recapAvailability by remember { mutableStateOf<RecapAvailability?>(null) }
+    var showRecap by remember { mutableStateOf(false) }
+
+    suspend fun loadRecapAvailability() {
+        recapAvailability = if (state.offlineLaunch) null else try {
+            App.api.get<RecapAvailability>("/api/year-recap/availability")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    LaunchedEffect(state.offlineLaunch, showRecap) {
+        if (!showRecap) loadRecapAvailability()
+    }
+    if (showRecap) YearRecapScreen { showRecap = false }
 
     LaunchedEffect(Unit) {
         if (!model.loaded) {
@@ -211,6 +228,7 @@ fun HomeScreen() {
         onRefresh = {
             scope.launch {
                 model.refreshing = true
+                loadRecapAvailability()
                 state.photos.refresh(App.api, force = true)
                 model.load()
                 model.refreshing = false
@@ -240,6 +258,9 @@ fun HomeScreen() {
                         IconButton(onClick = { nav.openSearch() }, Modifier.size(44.dp).background(Color.White.copy(alpha = 0.12f), CircleShape)) {
                             Icon(Icons.Filled.Search, "Поиск", Modifier.size(22.dp), tint = Color.White)
                         }
+                    }
+                    recapAvailability?.takeIf { it.available }?.let {
+                        YearRecapBanner(it.year) { showRecap = true }
                     }
                     RadioCard(model)
                 }

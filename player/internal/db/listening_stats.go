@@ -26,29 +26,8 @@ type ListeningPeriod struct {
 // plays; track_start boundaries distinguish repeated legacy plays in a session.
 func (s *Store) ListeningPeriodStats(from, until time.Time) (ListeningPeriod, error) {
 	out := ListeningPeriod{Tracks: []ListeningTrack{}, Artists: []ArtistCount{}}
-	const plays = `WITH events AS (
-        SELECT h.*,
-            SUM(CASE WHEN action='track_start' THEN 1 ELSE 0 END) OVER (
-                PARTITION BY session_id, track_id ORDER BY ts, id
-                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
-            ) AS run
-        FROM listening_history h
-        WHERE profile_id=? AND COALESCE(source,'') != 'share'
-          AND action IN ('track_start','progress','track_end','skip')
-    ), plays AS (
-        SELECT track_id, MIN(ts) AS started_at,
-            MAX(CASE WHEN action IN ('track_start','track_end','skip') THEN 1 ELSE 0 END) AS started,
-            MAX(CASE WHEN reason='completed' OR
-                (duration_sec > 0 AND listened_sec / duration_sec >= 0.8)
-                THEN 1 ELSE 0 END) AS finished,
-            MAX(CASE WHEN listened_sec > 0 THEN listened_sec ELSE 0 END) AS seconds
-        FROM events
-        GROUP BY track_id, COALESCE(NULLIF(impression_id,''),
-            'legacy:' || COALESCE(session_id,'') || ':' || CAST(run AS TEXT))
-    ), period AS (
-        SELECT * FROM plays WHERE started=1 AND REPLACE(started_at,' ','T') >= ? AND REPLACE(started_at,' ','T') < ?
-    ) `
-	args := []any{s.ProfileID, from.UTC().Format("2006-01-02T15:04:05"), until.UTC().Format("2006-01-02T15:04:05")}
+	plays := listeningPeriodPlays
+	args := listeningPeriodArgs(s.ProfileID, from, until)
 	var finished int
 	err := s.DB.QueryRow(plays+`SELECT COUNT(*), COALESCE(SUM(seconds),0), COALESCE(SUM(finished),0) FROM period`, args...).Scan(&out.Plays, &out.ListenedSeconds, &finished)
 	if err != nil {
@@ -77,4 +56,47 @@ func (s *Store) ListeningPeriodStats(from, until time.Time) (ListeningPeriod, er
 		out.Artists = []ArtistCount{}
 	}
 	return out, err
+}
+
+const listeningPeriodPlays = `WITH events AS (
+        SELECT h.*,
+            SUM(CASE WHEN action='track_start' THEN 1 ELSE 0 END) OVER (
+                PARTITION BY session_id, track_id ORDER BY ts, id
+                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+            ) AS run
+        FROM listening_history h
+        WHERE profile_id=? AND COALESCE(source,'') != 'share'
+          AND action IN ('track_start','progress','track_end','skip')
+    ), plays AS (
+        SELECT track_id, MIN(ts) AS started_at,
+            MAX(CASE WHEN action IN ('track_start','track_end','skip') THEN 1 ELSE 0 END) AS started,
+            MAX(CASE WHEN reason='completed' OR
+                (duration_sec > 0 AND listened_sec / duration_sec >= 0.8)
+                THEN 1 ELSE 0 END) AS finished,
+            MAX(CASE WHEN listened_sec > 0 THEN listened_sec ELSE 0 END) AS seconds
+        FROM events
+        GROUP BY track_id, COALESCE(NULLIF(impression_id,''),
+            'legacy:' || COALESCE(session_id,'') || ':' || CAST(run AS TEXT))
+    ), period AS (
+        SELECT * FROM plays WHERE started=1 AND REPLACE(started_at,' ','T') >= ? AND REPLACE(started_at,' ','T') < ?
+    ) `
+
+func listeningPeriodArgs(profile string, from, until time.Time) []any {
+	return []any{profile, from.UTC().Format("2006-01-02T15:04:05"), until.UTC().Format("2006-01-02T15:04:05")}
+}
+
+func (s *Store) ListeningArtistTrack(from, until time.Time, artist string) (*ListeningTrack, error) {
+	var track ListeningTrack
+	args := append(listeningPeriodArgs(s.ProfileID, from, until), artist)
+	err := s.DB.QueryRow(listeningPeriodPlays+`SELECT p.track_id, COALESCE(t.title,''), t.artist, COUNT(*)
+        FROM period p JOIN tracks t ON t.id=p.track_id WHERE t.artist=?
+        GROUP BY p.track_id, t.title, t.artist ORDER BY COUNT(*) DESC, p.track_id LIMIT 1`, args...).
+		Scan(&track.TrackID, &track.Title, &track.Artist, &track.Count)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &track, nil
 }
