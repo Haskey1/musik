@@ -374,6 +374,23 @@ def _song_key(artist: Any, title: Any) -> str:
     return f"{a}|{t}" if a and t else ""
 
 
+@dataclass(frozen=True)
+class MixPriorities:
+    # Older plays and older mix versions come first. Shelf overlap breaks ties.
+    history: dict[int, tuple[str, int, bool]]
+    earlier_openings: set[int]
+    opening_size: int
+
+    def key(self, row: int, position: int = 0) -> tuple[str, int, bool, bool]:
+        played, version, overlap = self.history.get(row, ("", 0, False))
+        return (
+            played,
+            version,
+            position < self.opening_size and row in self.earlier_openings,
+            overlap,
+        )
+
+
 def _labels(item: dict[str, Any]) -> list[str]:
     sources = item.get("sources")
     if sources:
@@ -504,6 +521,63 @@ def _fill_to_size(
         used.add(int(item["track_id"]))
         if artist:
             counts[artist] = counts.get(artist, 0) + 1
+    return chosen
+
+
+def _select_rotating_mix(
+    items: list[dict[str, Any]],
+    size: int,
+    quotas: dict[str, tuple[int, int]],
+    artist_limit: int | None,
+    priorities: MixPriorities,
+) -> list[dict[str, Any]]:
+    if not items:
+        return []
+    import numpy as np
+
+    vectors = np.asarray([item["vector"] for item in items], dtype=np.float32)
+    scores = [SPEC.mmr_lambda * float(item["score"]) for item in items]
+    artists = [_artist_key(item) for item in items]
+    minimum_order = {source: i for i, source in enumerate(reversed(SOURCE_PRIORITY))}
+    similarity = np.zeros(len(items), dtype=np.float32)
+    artist_counts: dict[str, int] = {}
+    counts: dict[str, int] = {}
+    remaining = set(range(len(items)))
+    chosen: list[dict[str, Any]] = []
+
+    while remaining and len(chosen) < size:
+        best = None
+        for i in remaining:
+            artist_count = artist_counts.get(artists[i], 0)
+            if artists[i] and artist_limit is not None and artist_count >= artist_limit:
+                continue
+            item = items[i]
+            slot = _quota_slot(item, counts, quotas)
+            quota_priority = len(minimum_order) + (slot is None)
+            if slot is not None and counts.get(slot, 0) < quotas[slot][0]:
+                quota_priority = minimum_order[slot]
+            relevance = (
+                scores[i] - SPEC.artist_penalty * artist_count
+                - (1 - SPEC.mmr_lambda) * float(similarity[i])
+            )
+            key = (
+                *priorities.key(int(item["row"]), len(chosen)),
+                quota_priority, -relevance, int(item["track_id"]),
+            )
+            if best is None or key < best[0]:
+                best = (key, i, slot)
+        if best is None:
+            break
+        _, i, slot = best
+        remaining.remove(i)
+        picked = dict(items[i])
+        if slot is not None:
+            picked["source"] = slot
+            counts[slot] = counts.get(slot, 0) + 1
+        if artists[i]:
+            artist_counts[artists[i]] = artist_counts.get(artists[i], 0) + 1
+        chosen.append(picked)
+        np.maximum(similarity, np.einsum("ij,j->i", vectors, vectors[i]), out=similarity)
     return chosen
 
 
@@ -857,12 +931,12 @@ def _matched_current(index: Any, current: Any) -> tuple[dict[str, Any] | None, i
     return index.meta[row], row
 
 
-def _top_k(score: list[float], k: int, allow: Any) -> list[int]:
+def _top_k(score: list[float], k: int, allow: Any, priority: Any = None) -> list[int]:
     if k < 1:
         return []
     ranked = sorted(
         ((row, sim) for row, sim in enumerate(score) if allow(row)),
-        key=lambda item: (-item[1], item[0]),
+        key=lambda item: (priority(item[0]) if priority else (), -item[1], item[0]),
     )
     return [row for row, _sim in ranked[:k]]
 
@@ -888,8 +962,9 @@ def _transition_rows(
     transitions: dict[int, float] | None,
     pool: int,
     allow: Any,
+    priority: Any = None,
 ) -> list[int]:
-    rows = _top_k(current_sims, pool, allow)
+    rows = _top_k(current_sims, pool, allow, priority)
     seen = set(rows)
     if current_meta is not None:
         window = [-2.0] * index.size
@@ -901,7 +976,7 @@ def _transition_rows(
             key = _key_compat(current_meta, meta)
             if (missing == 0 and bpm <= SPEC.bpm_window) or key >= SPEC.key_min:
                 window[row] = current_sims[row]
-        for row in _top_k(window, pool, lambda row: window[row] > -1.5):
+        for row in _top_k(window, pool, lambda row: window[row] > -1.5, priority):
             if row not in seen:
                 seen.add(row)
                 rows.append(row)
@@ -914,12 +989,12 @@ def _transition_rows(
         if row is None or not allow(row) or row in seen:
             continue
         ranked.append((int(row), weight_f))
-    ranked.sort(key=lambda item: (-item[1], item[0]))
+    ranked.sort(key=lambda item: (priority(item[0]) if priority else (), -item[1], item[0]))
     rows.extend(row for row, _weight in ranked[:pool])
     return rows
 
 
-def _resurface_rows(index: Any, now: datetime, pool: int, allow: Any) -> list[int]:
+def _resurface_rows(index: Any, now: datetime, pool: int, allow: Any, priority: Any = None) -> list[int]:
     hits: list[tuple[int, int, datetime]] = []
     for row in range(index.size):
         if not allow(row):
@@ -931,11 +1006,11 @@ def _resurface_rows(index: Any, now: datetime, pool: int, allow: Any) -> list[in
         if finished is None:
             continue
         hits.append((row, int(meta.get("finishes") or 0), finished))
-    hits.sort(key=lambda item: (-item[1], item[2], item[0]))
+    hits.sort(key=lambda item: (priority(item[0]) if priority else (), -item[1], item[2], item[0]))
     return [row for row, _finishes, _when in hits[:pool]]
 
 
-def _new_rows(index: Any, now: datetime, pool: int, allow: Any) -> list[int]:
+def _new_rows(index: Any, now: datetime, pool: int, allow: Any, priority: Any = None) -> list[int]:
     hits: list[tuple[int, datetime]] = []
     for row in range(index.size):
         if not allow(row):
@@ -947,20 +1022,22 @@ def _new_rows(index: Any, now: datetime, pool: int, allow: Any) -> list[int]:
         if created is None:
             continue
         hits.append((row, created))
-    hits.sort(key=lambda item: (-item[1].timestamp(), item[0]))
+    hits.sort(key=lambda item: (priority(item[0]) if priority else (), -item[1].timestamp(), item[0]))
     return [row for row, _created in hits[:pool]]
 
 
-def _adjacent_rows(taste: list[float], pool: int, allow: Any) -> list[int]:
+def _adjacent_rows(taste: list[float], pool: int, allow: Any, priority: Any = None) -> list[int]:
     lo, hi = SPEC.adjacent_taste, SPEC.exploit_taste
     score = [-2.0] * len(taste)
     for row, sim in enumerate(taste):
         if allow(row) and lo <= sim < hi:
             score[row] = sim
-    return _top_k(score, pool, lambda row: score[row] > -1.5)
+    return _top_k(score, pool, lambda row: score[row] > -1.5, priority)
 
 
-def _wildcard_rows(index: Any, taste: list[float], pool: int, allow: Any, negative: Any) -> list[int]:
+def _wildcard_rows(
+    index: Any, taste: list[float], pool: int, allow: Any, negative: Any, priority: Any = None,
+) -> list[int]:
     limit = SPEC.adjacent_taste
     clearance = SPEC.negative_clearance
     score = [-2.0] * index.size
@@ -971,7 +1048,7 @@ def _wildcard_rows(index: Any, taste: list[float], pool: int, allow: Any, negati
         if negative is not None and float(negative(index.matrix[row])) >= clearance:
             continue
         score[row] = -taste_sim
-    return _top_k(score, pool, lambda row: score[row] > -1.5)
+    return _top_k(score, pool, lambda row: score[row] > -1.5, priority)
 
 
 def _arm_rows(
@@ -987,6 +1064,7 @@ def _arm_rows(
     pool: int,
     negative: Any,
     artist_cap: int | None = None,
+    priority: Any = None,
 ) -> list[int]:
     md5s = list(getattr(index, "md5s", []) or [])
     current_md5 = ""
@@ -1025,12 +1103,12 @@ def _arm_rows(
             rows.append(row)
             taken += 1
 
-    add(_top_k(taste_sims, arm_pool, allow))
-    add(_transition_rows(index, current_meta, current_sims, transitions, arm_pool, allow))
-    add(_resurface_rows(index, now, arm_pool, allow))
-    add(_new_rows(index, now, arm_pool, allow))
-    add(_adjacent_rows(taste_sims, arm_pool, allow))
-    add(_wildcard_rows(index, taste_sims, arm_pool, allow, negative))
+    add(_top_k(taste_sims, arm_pool, allow, priority))
+    add(_transition_rows(index, current_meta, current_sims, transitions, arm_pool, allow, priority))
+    add(_resurface_rows(index, now, arm_pool, allow, priority))
+    add(_new_rows(index, now, arm_pool, allow, priority))
+    add(_adjacent_rows(taste_sims, arm_pool, allow, priority))
+    add(_wildcard_rows(index, taste_sims, arm_pool, allow, negative, priority))
     return rows
 
 
@@ -1049,6 +1127,7 @@ def rank_index(
     profile: str = "smooth",
     negative: Any = None,
     artist_limit: int | None = DEFAULT_ARTIST_LIMIT,
+    mix_priorities: MixPriorities | None = None,
 ) -> list[dict[str, Any]]:
     """Score an embedding index by arm, then apply the shared quotas.
 
@@ -1082,7 +1161,7 @@ def rank_index(
         else max(artist_limit * ARM_ARTIST_FACTOR, ARM_ARTIST_MIN)
     )
 
-    def build(cap: int | None) -> list[dict[str, Any]]:
+    def build(cap: int | None, width: int = arm_pool) -> list[dict[str, Any]]:
         rows = _arm_rows(
             index,
             taste_sims=taste_sims,
@@ -1092,9 +1171,10 @@ def rank_index(
             forbidden=forbidden,
             transitions=transitions,
             now=now,
-            pool=arm_pool,
+            pool=width,
             negative=negative,
             artist_cap=cap,
+            priority=mix_priorities.key if mix_priorities is not None else None,
         )
         items: list[dict[str, Any]] = []
         seen_md5: set[str] = set()
@@ -1103,6 +1183,9 @@ def rank_index(
             meta = index.meta[row_i]
             # the same file, or the same song under another id: one is enough
             md5 = str(meta.get("file_md5") or "")
+            if mix_priorities is not None and not md5:
+                md5s = getattr(index, "md5s", ())
+                md5 = md5s[row_i] if row_i < len(md5s) else ""
             song = _song_key(meta.get("artist"), meta.get("title"))
             if artist_limit is not None:
                 if (md5 and md5 in seen_md5) or (song and song in seen_songs):
@@ -1151,6 +1234,23 @@ def rank_index(
 
     quotas = scale_quotas(size, explore_ratio=explore_ratio)
     items = build(arm_cap)
+    if mix_priorities is not None:
+        chosen = _select_rotating_mix(items, size, quotas, artist_limit, mix_priorities)
+        if len(chosen) == size:
+            return chosen
+        # Exhaust the eligible catalogue before relaxing the artist limit.
+        items = build(None, index.size)
+        target = min(size, len(items))
+        if artist_limit is not None:
+            available: dict[str, int] = {}
+            for item in items:
+                artist = _artist_key(item)
+                available[artist] = available.get(artist, 0) + 1
+            uncredited = available.pop("", 0)
+            for limit in range(artist_limit, artist_limit + RELAX_STEPS + 1):
+                if uncredited + sum(min(n, limit) for n in available.values()) >= target:
+                    return _select_rotating_mix(items, target, quotas, limit, mix_priorities)
+        return _select_rotating_mix(items, target, quotas, None, mix_priorities)
     chosen = _fill_to_size(
         apply_quotas(items, size=size, quotas=quotas, artist_limit=artist_limit),
         items, size, artist_limit,

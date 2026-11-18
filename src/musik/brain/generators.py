@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from musik.brain.explain import explain_daily, explain_mood, explain_radio, explain_weekly
+from musik.brain.mix_rotation import MixPackRotation, rank_mix
 from musik.brain.ranker import mmr_select, rank_index
 from musik.brain.store import save_playlist
 from musik.config import get_settings
@@ -94,6 +95,7 @@ def generate_daily(
     seed: int | None = None,
     explore_ratio: float | None = None,
     forbidden_track_ids: set[int] | None = None,
+    mix_pack: MixPackRotation | None = None,
 ) -> PlaylistBuild:
     """Daily: shared linear ranker + source quotas + MMR."""
     index = load_index()
@@ -108,12 +110,9 @@ def generate_daily(
     center, center_src = _taste_vector(index)
     query = _noisy_query(center, rng, 0.02)
     forbidden = _forbidden_rows(index, forbidden_track_ids)
-    ranked = rank_index(
-        index,
-        taste=query,
-        forbidden=forbidden,
-        size=min(size, max(0, index.size - len(forbidden))),
-        explore_ratio=explore_ratio,
+    ranked, _ = rank_mix(
+        index, kind="daily", taste=query, forbidden=forbidden, size=size,
+        explore_ratio=explore_ratio, pack=mix_pack,
     )
     entries = _entries_from_ranked(
         ranked,

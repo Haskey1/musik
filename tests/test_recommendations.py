@@ -4,8 +4,9 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from musik.brain import mixes
+from musik.brain import mix_rotation, mixes
 from musik.brain.generators import _mmr_select
+from musik.brain.ranker import MixPriorities, _select_rotating_mix
 from musik.config import get_settings
 from musik.db.schema import init_db
 from musik.index.brute import EmbeddingIndex
@@ -40,6 +41,15 @@ class FakeIndex:
         return row if 0 <= row < self.size else None
 
 
+def _stub_mix_history(monkeypatch, index, recent_rows=()):
+    tracks = [
+        {**index.meta[row], "version": 1, "track_id": row + 1, "file_md5": ""}
+        for row in recent_rows
+    ]
+    monkeypatch.setattr(mix_rotation, "_recent_mix_tracks", lambda _: tracks)
+    monkeypatch.setattr(mix_rotation, "_recently_played_tracks", lambda *_: [])
+
+
 def test_for_you_is_seeded_and_avoids_recent_rows(monkeypatch) -> None:
     index = FakeIndex()
     monkeypatch.setattr(mixes, "load_index", lambda: index)
@@ -48,7 +58,7 @@ def test_for_you_is_seeded_and_avoids_recent_rows(monkeypatch) -> None:
         "_taste_vector",
         lambda _: (np.array([1.0, 0.0, 0.0], dtype=np.float32), "test"),
     )
-    monkeypatch.setattr(mixes, "_for_you_forbidden_rows", lambda *_args, **_kwargs: {0, 1})
+    _stub_mix_history(monkeypatch, index, [0, 1])
 
     first = mixes.generate_for_you(size=2, explore_ratio=0, seed=20260815)
     second = mixes.generate_for_you(size=2, explore_ratio=0, seed=20260815)
@@ -76,7 +86,7 @@ def test_for_you_rotates_with_seed(monkeypatch) -> None:
     center = index.centroid()
     monkeypatch.setattr(mixes, "load_index", lambda: index)
     monkeypatch.setattr(mixes, "_taste_vector", lambda _: (center, "test"))
-    monkeypatch.setattr(mixes, "_for_you_forbidden_rows", lambda *_args, **_kwargs: set())
+    _stub_mix_history(monkeypatch, index)
 
     day_one = mixes.generate_for_you(size=20, explore_ratio=0.2, seed=20260815)
     same_day = mixes.generate_for_you(size=20, explore_ratio=0.2, seed=20260815)
@@ -110,6 +120,22 @@ def test_mmr_diversifies_artists() -> None:
     assert len(artists) == 3
 
 
+def test_mix_mmr_remembers_tracks_selected_for_other_source_quotas() -> None:
+    candidates = [
+        {"row": 0, "track_id": 1, "artist": "A", "score": 1.0,
+         "vector": [1.0, 0.0], "source": "wildcard"},
+        {"row": 1, "track_id": 2, "artist": "B", "score": 1.0,
+         "vector": [1.0, 0.0], "source": "exploit"},
+        {"row": 2, "track_id": 3, "artist": "C", "score": 0.95,
+         "vector": [0.0, 1.0], "source": "exploit"},
+    ]
+    ranked = _select_rotating_mix(
+        candidates, 2, {"wildcard": (1, 1), "exploit": (1, 1)}, 2,
+        MixPriorities({}, set(), 0),
+    )
+    assert [item["track_id"] for item in ranked] == [1, 3]
+
+
 def test_for_you_small_catalog_falls_back_when_everything_is_recent(monkeypatch) -> None:
     index = FakeIndex()
     monkeypatch.setattr(mixes, "load_index", lambda: index)
@@ -118,11 +144,7 @@ def test_for_you_small_catalog_falls_back_when_everything_is_recent(monkeypatch)
         "_taste_vector",
         lambda _: (np.array([1.0, 0.0, 0.0], dtype=np.float32), "test"),
     )
-    monkeypatch.setattr(
-        mixes,
-        "_for_you_forbidden_rows",
-        lambda *_args, **_kwargs: set(range(index.size)),
-    )
+    _stub_mix_history(monkeypatch, index, range(index.size))
 
     playlist = mixes.generate_for_you(size=20, explore_ratio=0.25, seed=20260815)
     ids = [entry["track_id"] for entry in playlist.entries]

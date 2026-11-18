@@ -21,7 +21,7 @@ from musik.brain.generators import (
     generate_daily,
     generate_weekly,
 )
-from musik.brain.ranker import rank_index
+from musik.brain.mix_rotation import MIX_RECENT_DAYS, MixPackRotation, rank_mix
 from musik.brain.store import latest_playlist
 from musik.config import get_settings
 from musik.db.schema import connect, utcnow
@@ -111,45 +111,14 @@ def _weekday_taste(index: EmbeddingIndex, weekday: int) -> tuple[np.ndarray, str
     return blended.astype(np.float32), f"{src}+weekday_{weekday}", len(rows)
 
 
-def _for_you_forbidden_rows(
-    index: EmbeddingIndex,
-    *,
-    recent_days: int,
-) -> set[int]:
-    """Rows shown in the previous mix or heard recently; used as a soft exclusion."""
-    track_ids: set[int] = set()
-    previous = latest_playlist("for_you")
-    if previous:
-        track_ids.update(int(t["track_id"]) for t in previous["tracks"])
-    # Stored instants are UTC ISO-8601 text; a whole-second cutoff without a
-    # zone suffix orders correctly against both "Z" and "+00:00" forms.
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=max(1, recent_days))).strftime("%Y-%m-%dT%H:%M:%S")
-    with connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT DISTINCT track_id
-            FROM listening_history
-            WHERE profile_id = :profile
-              AND ts >= :cutoff
-              AND action IN ('start', 'finish', 'track_end', 'like', 'dislike')
-            """,
-            {"profile": conn.profile_id, "cutoff": cutoff},
-        ).fetchall()
-    track_ids.update(int(r["track_id"]) for r in rows)
-    return {
-        row
-        for track_id in track_ids
-        if (row := index.row_of(track_id)) is not None
-    }
-
-
 def generate_for_you(
     *,
     size: int = 40,
     explore_ratio: float | None = None,
     seed: int | None = None,
-    recent_days: int = 7,
+    recent_days: int = MIX_RECENT_DAYS,
     forbidden_track_ids: set[int] | None = None,
+    mix_pack: MixPackRotation | None = None,
 ) -> PlaylistBuild:
     """Strong personalization — 'Для вас'."""
     index = load_index()
@@ -163,28 +132,10 @@ def generate_for_you(
     center, center_src = _taste_vector(index)
     query = _noisy_query(center, rng, 0.02)
     pack_forbidden = _forbidden_rows(index, forbidden_track_ids)
-    soft_forbidden = (
-        _for_you_forbidden_rows(index, recent_days=recent_days) | pack_forbidden
+    ranked, priorities = rank_mix(
+        index, kind="for_you", taste=query, forbidden=pack_forbidden, size=size,
+        explore_ratio=explore_ratio, pack=mix_pack, recent_days=recent_days,
     )
-    preferred_size = min(size, max(0, index.size - len(soft_forbidden)))
-    ranked = rank_index(
-        index,
-        taste=query,
-        forbidden=soft_forbidden,
-        size=preferred_size,
-        explore_ratio=explore_ratio,
-    )
-    if len(ranked) < min(size, index.size):
-        used = {int(item["row"]) for item in ranked} | pack_forbidden
-        ranked.extend(
-            rank_index(
-                index,
-                taste=query,
-                forbidden=used,
-                size=min(size, index.size) - len(ranked),
-                explore_ratio=explore_ratio,
-            )
-        )
     entries = [
         {
             "track_id": int(item["track_id"]),
@@ -206,10 +157,10 @@ def generate_for_you(
             "center": center_src,
             "seed": seed,
             "recent_days": recent_days,
-            "excluded": len(soft_forbidden),
+            "excluded": len(pack_forbidden | priorities.history.keys()),
             "pack_excluded": len(pack_forbidden),
             "explore_ratio": explore_ratio,
-            "method": "ranker+quotas+recent-exclusion",
+            "method": "ranker+quotas+MMR+rotation",
         },
     )
 
@@ -222,6 +173,7 @@ def generate_weekday(
     size: int = 30,
     explore_ratio: float | None = None,
     forbidden_track_ids: set[int] | None = None,
+    mix_pack: MixPackRotation | None = None,
 ) -> PlaylistBuild:
     """Плейлист дня недели (0=Пн … 6=Вс). kind and title come from the mix contract."""
     if weekday < 0 or weekday > 6:
@@ -242,25 +194,10 @@ def generate_weekday(
     noise_scale = 0.035 if signal_count == 0 else 0.015
     q = _noisy_query(center, rng, noise_scale)
     forbidden = _forbidden_rows(index, forbidden_track_ids)
-    target_size = min(size, max(0, index.size - len(forbidden)))
-    ranked = rank_index(
-        index,
-        taste=q,
-        forbidden=forbidden,
-        size=target_size,
-        explore_ratio=explore_ratio,
+    ranked, _ = rank_mix(
+        index, kind=key, taste=q, forbidden=forbidden, size=size,
+        explore_ratio=explore_ratio, pack=mix_pack,
     )
-    if len(ranked) < min(size, index.size):
-        used = {int(item["row"]) for item in ranked} | forbidden
-        ranked.extend(
-            rank_index(
-                index,
-                taste=q,
-                forbidden=used,
-                size=min(size, index.size) - len(ranked),
-                explore_ratio=explore_ratio,
-            )
-        )
     entries = [
         {
             "track_id": int(item["track_id"]),
@@ -406,25 +343,27 @@ def _build_contract_mix(
     item: dict[str, Any],
     *,
     size: int,
-    forbidden: set[int],
+    blocked: set[int],
+    rotation: MixPackRotation,
 ) -> PlaylistBuild:
     kind = str(item["kind"])
     if kind == "for_you":
-        return generate_for_you(size=size, forbidden_track_ids=forbidden)
+        return generate_for_you(size=size, forbidden_track_ids=blocked, mix_pack=rotation)
     if kind == "daily":
-        build = generate_daily(size=size, forbidden_track_ids=forbidden)
+        build = generate_daily(size=size, forbidden_track_ids=blocked, mix_pack=rotation)
         build.name = f"На сегодня · {date.today().strftime('%d.%m')}"
         return build
     if kind == "new_releases":
-        return generate_new_releases(size=size, forbidden_track_ids=forbidden)
+        return generate_new_releases(size=size, forbidden_track_ids=blocked | rotation.earlier_openings)
     if kind == "weekly":
-        return generate_weekly(size=size, forbidden_track_ids=forbidden)
+        return generate_weekly(size=size, forbidden_track_ids=blocked | rotation.earlier_openings)
     return generate_weekday(
         int(item["weekday"]),
         kind=kind,
         title=str(item["title"]),
         size=size,
-        forbidden_track_ids=forbidden,
+        forbidden_track_ids=blocked,
+        mix_pack=rotation,
     )
 
 
@@ -444,14 +383,9 @@ def generate_mix_pack(
         ensure_mix_generator(item)
 
     results: dict[str, Any] = {}
-    reserved: set[int] = set(blocked_track_ids())
+    blocked = blocked_track_ids()
+    rotation = MixPackRotation(opening_size=max(1, reserve_prefix))
     weekdays: list[dict[str, Any]] = []
-
-    def reserve(build: PlaylistBuild) -> None:
-        reserved.update(
-            int(entry["track_id"])
-            for entry in build.entries[: max(1, reserve_prefix)]
-        )
 
     for item in contract:
         kind = str(item["kind"])
@@ -465,7 +399,8 @@ def generate_mix_pack(
                 weekly_size=weekly_size,
                 new_size=new_size,
             ),
-            forbidden=reserved,
+            blocked=blocked,
+            rotation=rotation,
         )
         if kind == "new_releases":
             playlist_id = build.persist() if build.entries else None
@@ -481,11 +416,13 @@ def generate_mix_pack(
         else:
             playlist_id = build.persist()
             results[kind] = {"id": playlist_id, "name": build.name, "n": len(build.entries)}
-        reserve(build)
+        track_ids = [int(entry["track_id"]) for entry in build.entries]
+        rotation.earlier_tracks.update(track_ids)
+        rotation.earlier_openings.update(track_ids[:rotation.opening_size])
 
     results["weekdays"] = weekdays
     results["reserved_prefix"] = max(1, reserve_prefix)
-    results["reserved_tracks"] = len(reserved)
+    results["reserved_tracks"] = len(blocked | rotation.earlier_openings)
     results["generated_at"] = utcnow()
     return results
 

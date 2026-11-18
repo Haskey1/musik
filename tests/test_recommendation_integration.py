@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from collections import Counter
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
 from musik.brain import generators, mixes
-from musik.brain.store import latest_playlist
+from musik.brain.store import latest_playlist, save_playlist
 from musik.config import get_settings
 from musik.db.schema import connect, init_db, utcnow
 from musik.index.brute import EmbeddingIndex
@@ -206,3 +207,58 @@ def test_mix_pack_has_distinct_shelf_openings_without_weekday_history(
     assert weekday_meta is not None
     assert json.loads(weekday_meta["meta_json"])["weekday_signals"] == 0
     get_settings.cache_clear()
+
+
+def test_personalized_mix_pack_rotates_through_four_builds(
+    monkeypatch, tmp_path, test_database,
+) -> None:
+    test_database(tmp_path / "musik.db")
+    init_db()
+    index = _catalog(220)
+    monkeypatch.setattr(mixes, "load_index", lambda: index)
+    monkeypatch.setattr(generators, "load_index", lambda: index)
+    _insert_tracks(index)
+    _save_online_taste(index.matrix[:20].mean(axis=0))
+    kinds = ("for_you", "daily", "weekday_mon")
+    contract = [item for item in mixes.load_mix_contract() if item["kind"] in kinds]
+    previous = {kind: set() for kind in kinds}
+    for _ in range(4):
+        mixes.generate_mix_pack(
+            mixes=contract, for_you_size=12, daily_size=12, weekday_size=12,
+        )
+        pack_ids: set[int] = set()
+        for kind in kinds:
+            tracks = latest_playlist(kind)["tracks"]
+            ids = {track["track_id"] for track in tracks}
+            assert len(ids) == 12
+            assert ids.isdisjoint(previous[kind])
+            assert ids.isdisjoint(pack_ids)
+            assert max(Counter(track["artist"] for track in tracks).values()) <= 2
+            previous[kind].update(ids)
+            pack_ids.update(ids)
+
+
+def test_mix_fallback_uses_oldest_versions_and_cools_down_song_aliases(
+    monkeypatch, tmp_path, test_database,
+) -> None:
+    test_database(tmp_path / "musik.db")
+    init_db()
+    index = _catalog(6)
+    index.meta[5].update(artist=index.meta[2]["artist"], title=index.meta[2]["title"])
+    _insert_tracks(index)
+    monkeypatch.setattr(generators, "load_index", lambda: index)
+    for track_id in (1, 2, 3):
+        save_playlist(kind="daily", name="daily", entries=[{"track_id": track_id}])
+    with connect() as conn:
+        for track_id, hours_ago in ((4, 47), (5, 49)):
+            conn.execute(
+                """
+                INSERT INTO listening_history(track_id, ts, source, action, weekday, profile_id)
+                VALUES (:id, :ts, 'test', 'start', 0, :profile)
+                """,
+                {"id": track_id, "ts": (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat(),
+                 "profile": conn.profile_id},
+            )
+
+    daily = generators.generate_daily(size=5, forbidden_track_ids={3})
+    assert [item["track_id"] for item in daily.entries] == [5, 1, 2, 6, 4]
