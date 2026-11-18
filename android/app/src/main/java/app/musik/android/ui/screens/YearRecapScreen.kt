@@ -8,7 +8,14 @@ import android.media.MediaPlayer
 import android.util.Base64
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.rotate
+import kotlin.math.sin
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -34,7 +41,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -54,7 +60,6 @@ import app.musik.android.data.ArtistCount
 import app.musik.android.data.jsonBody
 import app.musik.android.ui.App
 import app.musik.android.ui.Artwork
-import app.musik.android.ui.HazeTexture
 import app.musik.android.ui.MusikColors
 import app.musik.android.ui.displayStyle
 import kotlinx.coroutines.CancellationException
@@ -95,9 +100,11 @@ private data class RecapClip(val audio: String)
 
 private enum class RecapPage(val tint: Color) {
     Intro(Color(0xFFF1772D)),
-    Time(Color(0xFF678A70)),
+    Time(Color(0xFFBA4930)),
     Track(Color(0xFFF0453A)),
-    Artist(Color(0xFF678A70)),
+    Tracks(Color(0xFF6744B6)),
+    Artist(Color(0xFF9C3271)),
+    Artists(Color(0xFF973866)),
     Finish(Color(0xFFF1772D)),
 }
 
@@ -105,10 +112,11 @@ private val recapCream = Color(0xFFF6E9DC)
 
 @Composable
 internal fun YearRecapBanner(year: Int, onOpen: () -> Unit) {
-    Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
             .background(Brush.horizontalGradient(listOf(Color(0xFF49251C), Color(0xFF9C441E), MusikColors.accent)))
-            .clickable(onClick = onOpen).padding(19.dp),
+            .clickable(onClick = onOpen)) {
+        RecapSilk(Modifier.matchParentSize(), MusikColors.accentBright)
+        Row(Modifier.fillMaxWidth().padding(19.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -116,6 +124,7 @@ internal fun YearRecapBanner(year: Int, onOpen: () -> Unit) {
             Text("Смотреть итоги", fontWeight = FontWeight.SemiBold, color = recapCream)
         }
         Icon(Icons.AutoMirrored.Filled.ArrowForward, null, tint = recapCream)
+        }
     }
 }
 
@@ -141,12 +150,22 @@ internal fun YearRecapScreen(onClose: () -> Unit) {
     val pages = remember(recap) {
         val data = recap ?: return@remember emptyList()
         if (data.stats.tracks.isEmpty()) listOf(RecapPage.Intro, RecapPage.Time, RecapPage.Finish)
-        else RecapPage.entries.filter { it != RecapPage.Artist || data.artistTrack != null }
+        else RecapPage.entries.filter { when (it) {
+            RecapPage.Artist -> data.artistTrack != null
+            RecapPage.Artists -> data.stats.artists.size > 1
+            RecapPage.Tracks -> data.stats.tracks.size > 1
+            else -> true
+        } }
     }
     val page = pages.getOrNull(index) ?: RecapPage.Intro
-    val backingTrack = if (page == RecapPage.Artist) recap?.artistTrack else recap?.stats?.tracks?.firstOrNull()
+    val backingTrack = when (page) {
+        RecapPage.Artist, RecapPage.Artists -> recap?.artistTrack ?: recap?.stats?.tracks?.firstOrNull()
+        RecapPage.Tracks -> recap?.stats?.tracks?.getOrNull(1)
+        RecapPage.Time -> recap?.stats?.tracks?.lastOrNull()
+        else -> recap?.stats?.tracks?.firstOrNull()
+    }
     val running = page != RecapPage.Intro && page != RecapPage.Finish
-    val enabled = active && running && !muted && !paused && !holding
+    val enabled = active && running && !paused && !holding
     val playSound by rememberUpdatedState(enabled)
     val tint by animateColorAsState(page.tint, tween(430), label = "Фон итогов")
 
@@ -189,7 +208,8 @@ internal fun YearRecapScreen(onClose: () -> Unit) {
             val bytes = clips[track.id] ?: App.api.get<RecapClip>("/api/year-recap/clips/${track.id}").let {
                 Base64.decode(it.audio, Base64.DEFAULT).also { data -> clips[track.id] = data }
             }
-            sound.prepare(bytes) {
+            sound.prepare(bytes, { progress }) {
+                sound.mute(muted)
                 ready = true
                 sound.setPlaying(playSound)
             }
@@ -199,13 +219,13 @@ internal fun YearRecapScreen(onClose: () -> Unit) {
             ready = true
         }
     }
-    LaunchedEffect(enabled) { sound.setPlaying(enabled) }
+    LaunchedEffect(enabled, muted) { sound.mute(muted); sound.setPlaying(enabled) }
     LaunchedEffect(index, running, paused, active, muted, ready, holding) {
         if (!running || paused || holding || !active) return@LaunchedEffect
-        if (!muted && backingTrack != null && !ready) delay(6000)
+        if (!muted && backingTrack != null && !ready) return@LaunchedEffect
         while (progress < 1f) {
             delay(100)
-            progress = (progress + 1f / 160).coerceAtMost(1f)
+            progress = sound.fraction() ?: (progress + 1f / 160).coerceAtMost(1f)
         }
         select(index + 1)
     }
@@ -217,7 +237,7 @@ internal fun YearRecapScreen(onClose: () -> Unit) {
         CompositionLocalProvider(LocalContentColor provides recapCream) {
             Box(Modifier.fillMaxSize().background(MusikColors.background)
                 .background(Brush.verticalGradient(listOf(tint.copy(alpha = 0.58f), Color.Transparent, tint.copy(alpha = 0.2f))))) {
-                HazeTexture(Modifier.matchParentSize().alpha(0.27f))
+                RecapSilk(Modifier.matchParentSize(), tint)
                 Column(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 20.dp, vertical = 10.dp)) {
                     if (pages.isNotEmpty()) {
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
@@ -291,8 +311,8 @@ internal fun YearRecapScreen(onClose: () -> Unit) {
                                 modifier = Modifier.fillMaxSize().graphicsLayer { translationX = drag * 0.8f },
                                 transitionSpec = {
                                     val sign = if (targetState > initialState) 1 else -1
-                                    (fadeIn(tween(420)) + slideInHorizontally(tween(420)) { sign * it / 7 }) togetherWith
-                                        (fadeOut(tween(340)) + slideOutHorizontally(tween(420)) { -sign * it / 7 })
+                                    (scaleIn(tween(550), initialScale = 0.84f) + fadeIn(tween(500)) + slideInHorizontally(tween(420)) { sign * it / 2 }) togetherWith
+                                        (fadeOut(tween(340)) + slideOutHorizontally(tween(420)) { -sign * it / 2 })
                                 },
                                 label = "Слайды итогов",
                             ) { visibleIndex ->
@@ -352,14 +372,17 @@ private fun RecapContent(
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterVertically)) {
         when (page) {
             RecapPage.Intro -> {
+                CoverFan(recap.stats.tracks, artworkSize)
                 Text("Твой\n${recap.year}", style = displayStyle(76))
                 Text("У каждого года есть своё звучание", style = MaterialTheme.typography.titleLarge)
                 RecapButton("Начать →", onStart)
             }
             RecapPage.Time -> {
+                CoverFan(recap.stats.tracks, artworkSize)
                 Text("Музыка была рядом", style = displayStyle(28))
                 Text(number((recap.stats.seconds / 60).toInt()), style = displayStyle(63), maxLines = 1)
-                Text("минут музыки", style = MaterialTheme.typography.titleLarge)
+                Text("минут с музыкой", style = MaterialTheme.typography.titleLarge)
+                if (recap.stats.seconds >= 3600) Text("Если включить всё подряд — ${(recap.stats.seconds / 3600).toInt()} ч ${(recap.stats.seconds / 60).toInt() % 60} мин")
                 Text("Прослушиваний за год · ${number(recap.stats.plays)}")
             }
             RecapPage.Track -> if (track != null) {
@@ -376,14 +399,42 @@ private fun RecapContent(
                     photo = App.state.photos.url(App.api, artist.artist, 640))
                 Text("Прослушиваний · ${number(artist.count)}")
             }
+            RecapPage.Tracks -> {
+                Text("Твой хит-парад", style = displayStyle(38))
+                Text("Песни, к которым ты возвращался чаще всего.")
+                recap.stats.tracks.take(5).forEachIndexed { i, item ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("${i + 1}", Modifier.width(30.dp), style = displayStyle(26))
+                        Artwork(item.id, Modifier.size(minOf(55.dp, artworkSize / 5)), fallback = item.title)
+                        Column(Modifier.weight(1f)) {
+                            Text(item.title, maxLines = 1, fontWeight = FontWeight.Bold)
+                            Text(item.artist, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Text("×${item.count}", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+            RecapPage.Artists -> {
+                Text("Твои люди", style = displayStyle(42))
+                Text("Эти голоса звучали у тебя чаще других.")
+                recap.stats.artists.take(3).forEachIndexed { i, item ->
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Text("${i + 1}", style = displayStyle(30))
+                        Artwork(recap.stats.tracks.firstOrNull { it.artist == item.artist }?.id,
+                            Modifier.size(minOf(76.dp, artworkSize / 3)).clip(CircleShape), fallback = item.artist,
+                            photo = App.state.photos.url(App.api, item.artist, 320))
+                        Column {
+                            Text(item.artist, style = displayStyle(22), maxLines = 2)
+                            Text("Прослушиваний · ${item.count}", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
             RecapPage.Finish -> {
                 Text("Так звучал\nтвой ${recap.year}", style = displayStyle(44))
                 if (track != null) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        recap.stats.tracks.take(3).forEach {
-                            Artwork(it.id, Modifier.size(minOf(82.dp, artworkSize / 3)), fallback = it.title)
-                        }
-                    }
+                    CoverFan(recap.stats.tracks, artworkSize * 0.7f)
+                    Text("${number((recap.stats.seconds / 60).toInt())} минут вместе", fontWeight = FontWeight.Bold)
                     Text("Трек года — ${track.title}", maxLines = 2)
                     if (artist != null) Text("Артист года — ${artist.artist}", maxLines = 2)
                     RecapButton("Слушать плейлист года", onPlaylist)
@@ -391,6 +442,39 @@ private fun RecapContent(
                 } else Text("В истории пока нет треков за этот год.")
                 TextButton(onClick = onReplay) { Text("Смотреть снова", color = recapCream) }
             }
+        }
+    }
+}
+
+@Composable
+private fun CoverFan(tracks: List<RecapTrack>, artworkSize: androidx.compose.ui.unit.Dp) {
+    Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy((-18).dp)) {
+        tracks.take(3).forEachIndexed { i, item ->
+            Artwork(item.id, Modifier.size(minOf(120.dp, artworkSize * 0.42f)).rotate((i - 1) * 9f), fallback = item.title)
+        }
+    }
+}
+
+@Composable
+private fun RecapSilk(modifier: Modifier, tint: Color) {
+    val motion = rememberInfiniteTransition(label = "Свет")
+    val phase by motion.animateFloat(0f, 6.283185f,
+        infiniteRepeatable(tween(14000, easing = LinearEasing)), label = "Шёлк")
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val light = Brush.linearGradient(listOf(tint.copy(alpha = .18f), Color(0xAAFFAB54),
+            Color(0x66FF7299), tint), Offset.Zero, Offset(w, h))
+        repeat(32) { i ->
+            val u = i / 31f
+            val wave = sin(phase + 2f * u)
+            val ribbon = Path().apply {
+                moveTo(-.15f * w, h * (.17f + .21f * u))
+                cubicTo(w * (.95f + wave * .22f), -h * (.18f + .35f * u),
+                    w * (.22f + wave * .24f), h * (1.08f - .27f * u),
+                    1.15f * w, h * (.56f + .28f * u))
+            }
+            drawPath(ribbon, light, style = Stroke((if (i % 8 == 0) 2.2.dp else .85.dp).toPx()))
         }
     }
 }
@@ -409,9 +493,27 @@ private class RecapSound {
     private var prepared = false
     private val fading = mutableMapOf<MediaPlayer, ValueAnimator>()
 
-    fun prepare(bytes: ByteArray, onReady: () -> Unit) {
+    private var completed = false
+    private var silent = false
+    private var gain = 0f
+    private var attack: ValueAnimator? = null
+
+    fun mute(value: Boolean) {
+        silent = value
+        if (prepared) current?.setVolume(if (silent) 0f else gain, if (silent) 0f else gain)
+    }
+
+    fun fraction(): Float? {
+        val media = current ?: return null
+        if (!prepared || media.duration <= 0) return null
+        return if (completed) 1f else (media.currentPosition.toFloat() / media.duration).coerceIn(0f, 1f)
+    }
+
+    fun prepare(bytes: ByteArray, position: () -> Float, onReady: () -> Unit) {
         val next = MediaPlayer()
         current = next
+        completed = false
+        gain = 0f
         try {
             next.setAudioAttributes(AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build())
@@ -427,10 +529,12 @@ private class RecapSound {
             })
             next.setOnPreparedListener {
                 if (current == next) {
+                    if (position() > 0) next.seekTo((position() * next.duration).toInt())
                     prepared = true
                     onReady()
                 }
             }
+            next.setOnCompletionListener { if (current == next) completed = true }
             next.setOnErrorListener { _, _, _ ->
                 if (current == next) {
                     releaseCurrent()
@@ -448,11 +552,26 @@ private class RecapSound {
     fun setPlaying(play: Boolean) {
         val media = current ?: return
         if (!prepared) return
-        if (play && !media.isPlaying) media.start()
+        if (play && !completed && !media.isPlaying) {
+            attack?.cancel()
+            gain = 0f
+            media.setVolume(0f, 0f)
+            media.start()
+            attack = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 1250
+                addUpdateListener {
+                    gain = it.animatedValue as Float
+                    val level = if (silent) 0f else gain
+                    media.setVolume(level, level)
+                }
+                start()
+            }
+        }
         if (!play && media.isPlaying) media.pause()
     }
 
     fun fadeOut() {
+        attack?.cancel()
         val old = current ?: return
         val playing = prepared && old.isPlaying
         current = null
@@ -461,7 +580,7 @@ private class RecapSound {
             old.release()
             return
         }
-        val fade = ValueAnimator.ofFloat(1f, 0f).apply {
+        val fade = ValueAnimator.ofFloat(if (silent) 0f else gain, 0f).apply {
             duration = 250
             addUpdateListener {
                 val volume = it.animatedValue as Float
@@ -487,6 +606,7 @@ private class RecapSound {
     }
 
     private fun releaseCurrent() {
+        attack?.cancel()
         current?.release()
         current = null
         prepared = false

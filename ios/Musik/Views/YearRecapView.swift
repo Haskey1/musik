@@ -34,7 +34,7 @@ struct YearRecapBanner: View {
                 ZStack {
                     LinearGradient(colors: [Color(hex: 0x49251C), Color(hex: 0x9C441E), Theme.accent],
                                    startPoint: .bottomLeading, endPoint: .topTrailing)
-                    HazeTexture().opacity(0.55)
+                    RecapSilk(tint: Theme.accentBright)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 24))
@@ -44,12 +44,14 @@ struct YearRecapBanner: View {
 }
 
 private enum RecapPage: Int, CaseIterable {
-    case intro, time, track, artist, finish
+    case intro, time, track, tracks, artist, artists, finish
 
     var tint: Color {
         switch self {
         case .intro, .finish: Theme.accent
-        case .time, .artist: Theme.teal
+        case .time: Color(hex: 0xBA4930)
+        case .artist, .artists: Color(hex: 0x9C3271)
+        case .tracks: Color(hex: 0x6744B6)
         case .track: Theme.love
         }
     }
@@ -67,6 +69,7 @@ struct YearRecapView: View {
     @State private var direction: CGFloat = 1
     @GestureState private var drag: CGFloat = 0
     @State private var progress = 0.0
+    @State private var loadingClip = false
     @State private var muted = false
     @State private var paused = false
     @State private var holding = false
@@ -77,11 +80,23 @@ struct YearRecapView: View {
     private var pages: [RecapPage] {
         guard let recap else { return [] }
         guard !recap.stats.tracks.isEmpty else { return [.intro, .time, .finish] }
-        return RecapPage.allCases.filter { $0 != .artist || recap.artistTrack != nil }
+        return RecapPage.allCases.filter { page in
+            switch page {
+            case .artist: return recap.artistTrack != nil
+            case .artists: return recap.stats.artists.count > 1
+            case .tracks: return recap.stats.tracks.count > 1
+            default: return true
+            }
+        }
     }
     private var page: RecapPage { pages.indices.contains(index) ? pages[index] : .intro }
     private var backingTrack: ListeningTrack? {
-        page == .artist ? recap?.artistTrack : recap?.stats.tracks.first
+        switch page {
+        case .artist, .artists: return recap?.artistTrack ?? recap?.stats.tracks.first
+        case .tracks: return recap?.stats.tracks.dropFirst().first
+        case .time: return recap?.stats.tracks.last
+        default: return recap?.stats.tracks.first
+        }
     }
 
     var body: some View {
@@ -89,7 +104,7 @@ struct YearRecapView: View {
             Theme.background.ignoresSafeArea()
             RadialGradient(colors: [page.tint.opacity(0.66), .clear], center: .topTrailing,
                            startRadius: 0, endRadius: 460).ignoresSafeArea()
-            HazeTexture().opacity(0.28).ignoresSafeArea()
+            RecapSilk(tint: page.tint).ignoresSafeArea()
             VStack(spacing: 10) {
                 header
                 if let recap {
@@ -98,8 +113,8 @@ struct YearRecapView: View {
                             content(recap, height: geometry.size.height)
                                 .id(page)
                                 .transition(reduceMotion ? .opacity : .asymmetric(
-                                    insertion: .offset(x: 55 * direction).combined(with: .opacity),
-                                    removal: .offset(x: -55 * direction).combined(with: .opacity)))
+                                    insertion: .scale(scale: 0.83).combined(with: .offset(x: 145 * direction)).combined(with: .opacity),
+                                    removal: .offset(x: -145 * direction).combined(with: .opacity)))
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .offset(x: drag * 0.8)
@@ -144,12 +159,11 @@ struct YearRecapView: View {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
                 guard page != .intro && page != .finish, !paused, !holding, scene == .active else { continue }
-                // Give the clip time to load when this track is being analyzed for the first time.
-                if !muted && backingTrack != nil && audio == nil && progress < 0.12 {
-                    progress += 0.002
-                    continue
+                if let audio, audio.duration > 0 {
+                    progress = audio.isPlaying ? audio.currentTime / audio.duration : 1
+                } else if !loadingClip || muted {
+                    progress += 0.1 / 16
                 }
-                progress += 0.1 / 16
                 if progress >= 1 { move(1); return }
             }
         }
@@ -219,14 +233,19 @@ struct YearRecapView: View {
             Spacer(minLength: 0)
             switch page {
             case .intro:
+                coverFan(recap.stats.tracks, height: height)
                 Text("Твой\n\(String(recap.year))").font(.display(79)).minimumScaleFactor(0.62).lineLimit(2)
                 Text("У каждого года есть своё звучание").font(.title3)
                 Spacer(minLength: 0)
                 Button("Начать →") { move(1) }.buttonStyle(PrimaryButtonStyle())
             case .time:
+                coverFan(recap.stats.tracks, height: height)
                 Text("Музыка была рядом").font(.display(28))
                 Text(Int(recap.stats.listenedSeconds / 60).formatted()).font(.display(76)).minimumScaleFactor(0.5).lineLimit(1)
-                Text("минут музыки").font(.title2)
+                Text("минут с музыкой").font(.title2)
+                if recap.stats.listenedSeconds >= 3600 {
+                    Text("Если включить всё подряд — \(Int(recap.stats.listenedSeconds / 3600)) ч \(Int(recap.stats.listenedSeconds / 60) % 60) мин").font(.headline)
+                }
                 Text("Прослушиваний за год · \(recap.stats.plays.formatted())").foregroundStyle(Theme.muted)
             case .track:
                 if let track = recap.stats.tracks.first {
@@ -246,15 +265,42 @@ struct YearRecapView: View {
                         .frame(width: min(290, height * 0.47))
                     Text("Прослушиваний · \(artist.count.formatted())").font(.headline)
                 }
+            case .tracks:
+                Text("Твой хит-парад").font(.display(38))
+                Text("Песни, к которым ты возвращался чаще всего.")
+                ForEach(Array(recap.stats.tracks.prefix(5).enumerated()), id: \.offset) { rank, item in
+                    HStack(spacing: 12) {
+                        Text(String(rank + 1)).font(.display(26)).frame(width: 30)
+                        ArtworkView(trackId: item.trackId, fallback: item.title, cornerRadius: 8)
+                            .frame(width: min(55, height * 0.09))
+                        VStack(alignment: .leading) {
+                            Text(item.title).font(.headline).lineLimit(1)
+                            Text(item.artist).font(.caption).lineLimit(1)
+                        }
+                        Spacer()
+                        Text("×" + String(item.count)).font(.caption.bold())
+                    }
+                }
+            case .artists:
+                Text("Твои люди").font(.display(42))
+                Text("Эти голоса звучали у тебя чаще других.")
+                ForEach(Array(recap.stats.artists.prefix(3).enumerated()), id: \.offset) { rank, item in
+                    HStack(spacing: 14) {
+                        Text(String(rank + 1)).font(.display(30))
+                        ArtworkView(trackId: recap.stats.tracks.first { $0.artist == item.artist }?.trackId,
+                                    fallback: item.artist, photo: ArtistPhotos.shared.url(for: item.artist, width: 320, api: app.api))
+                            .frame(width: min(76, height * 0.14)).clipShape(Circle())
+                        VStack(alignment: .leading) {
+                            Text(item.artist).font(.title2.bold()).lineLimit(2)
+                            Text("Прослушиваний · " + String(item.count)).font(.caption)
+                        }
+                    }
+                }
             case .finish:
                 Text("Так звучал\nтвой \(String(recap.year))").font(.display(47)).minimumScaleFactor(0.6)
                 if let track = recap.stats.tracks.first {
-                    HStack(spacing: 8) {
-                        ForEach(recap.stats.tracks.prefix(3)) { item in
-                            ArtworkView(trackId: item.trackId, fallback: item.title, cornerRadius: 12)
-                                .frame(width: min(86, height * 0.16))
-                        }
-                    }
+                    coverFan(recap.stats.tracks, height: height * 0.7)
+                    Text("\(Int(recap.stats.listenedSeconds / 60).formatted()) минут вместе").font(.title3.bold())
                     Text("Трек года — \(track.title)").font(.headline).lineLimit(2)
                     if let artist = recap.stats.artists.first { Text("Артист года — \(artist.artist)").lineLimit(2) }
                     Button("Слушать плейлист года") {
@@ -281,6 +327,18 @@ struct YearRecapView: View {
         })
     }
 
+    private func coverFan(_ tracks: [ListeningTrack], height: CGFloat) -> some View {
+        HStack(spacing: -18) {
+            ForEach(Array(tracks.prefix(3).enumerated()), id: \.offset) { i, item in
+                ArtworkView(trackId: item.trackId, fallback: item.title, cornerRadius: 12)
+                    .frame(width: min(120, height * 0.19))
+                    .rotationEffect(.degrees(Double(i - 1) * 9))
+                    .shadow(radius: 6)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
     private func load() async {
         error = false
         do { recap = try await app.api.get("/api/year-recap") }
@@ -302,6 +360,7 @@ struct YearRecapView: View {
     }
 
     private func fetchAudio() async {
+        loadingClip = false
         let previous = audio
         audio = nil
         previous?.setVolume(0, fadeDuration: 0.25)
@@ -312,6 +371,8 @@ struct YearRecapView: View {
             }
         }
         guard page != .intro, page != .finish, let id = backingTrack?.trackId else { return }
+        loadingClip = true
+        defer { if !Task.isCancelled { loadingClip = false } }
         do {
             let data: Data
             if let cached = clips[id] { data = cached }
@@ -323,18 +384,45 @@ struct YearRecapView: View {
             clips[id] = data
             audio = try AVAudioPlayer(data: data)
             audio?.prepareToPlay()
+            if let audio { audio.currentTime = progress * audio.duration }
             updateAudio()
         } catch { }
     }
 
     private func updateAudio() {
         guard let audio else { return }
-        if muted || paused || holding || scene != .active || page == .intro || page == .finish {
+        if paused || holding || scene != .active || page == .intro || page == .finish {
             audio.pause()
         } else if !audio.isPlaying {
             audio.volume = 0
             audio.play()
-            audio.setVolume(1, fadeDuration: 0.32)
+            audio.setVolume(muted ? 0 : 1, fadeDuration: 1.25)
+        } else {
+            audio.setVolume(muted ? 0 : 1, fadeDuration: 0.28)
         }
+    }
+}
+
+private struct RecapSilk: View {
+    let tint: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: reduceMotion)) { time in
+            Canvas { context, size in
+                let phase = reduceMotion ? 0 : time.date.timeIntervalSinceReferenceDate * 0.45
+                let w = size.width, h = size.height
+                for i in 0..<32 {
+                    let u = CGFloat(i) / 31
+                    let wave = CGFloat(sin(phase + Double(u) * 2))
+                    var path = Path()
+                    path.move(to: CGPoint(x: -0.15*w, y: h*(0.17 + 0.21*u)))
+                    path.addCurve(to: CGPoint(x: 1.15*w, y: h*(0.56 + 0.28*u)),
+                                  control1: CGPoint(x: w*(0.95 + wave*0.22), y: -h*(0.18 + 0.35*u)),
+                                  control2: CGPoint(x: w*(0.22 + wave*0.24), y: h*(1.08 - 0.27*u)))
+                    context.stroke(path, with: .linearGradient(Gradient(colors: [tint.opacity(0.18), Color.orange.opacity(0.55), Color.pink.opacity(0.32), tint]), startPoint: .zero, endPoint: CGPoint(x: w,y: h)), lineWidth: i % 8 == 0 ? 2.2 : 0.85)
+                }
+            }
+        }.allowsHitTesting(false).accessibilityHidden(true)
     }
 }
