@@ -264,7 +264,7 @@ struct YearRecapView: View {
                         dismiss()
                     }
                     .buttonStyle(PrimaryButtonStyle())
-                    ShareLink(item: "Мой \(recap.year) в musik · \(Int(recap.stats.listenedSeconds / 60)) мин музыки · \(track.title) — \(track.artist)") {
+                    SwiftUI.ShareLink(item: "Мой \(recap.year) в musik · \(Int(recap.stats.listenedSeconds / 60)) мин музыки · \(track.title) — \(track.artist)") {
                         Label("Поделиться итогами", systemImage: "square.and.arrow.up")
                     }
                 } else {

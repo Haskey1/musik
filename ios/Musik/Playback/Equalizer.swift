@@ -106,15 +106,33 @@ final class Equalizer: ObservableObject {
             unprepare: tapUnprepare,
             process: tapProcess
         )
-        var tap: Unmanaged<MTAudioProcessingTap>?
-        let status = MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks,
-                                                MTAudioProcessingTapCreationFlags(kMTAudioProcessingTapCreationFlag_PostEffects),
-                                                &tap)
+        let flags = MTAudioProcessingTapCreationFlags(kMTAudioProcessingTapCreationFlag_PostEffects)
+        let (status, tap) = createTapOutput { output in
+            MTAudioProcessingTapCreate(kCFAllocatorDefault, &callbacks, flags, output)
+        }
         guard status == noErr, let tap else {
             Unmanaged<TapContext>.fromOpaque(callbacks.clientInfo!).release()
             return nil
         }
-        return tap.takeRetainedValue()
+        return ownedTap(tap)
+    }
+
+    // Let the SDK infer its output type. Older SDKs expose an unmanaged
+    // result, while newer SDKs import the retained output as a managed object.
+    nonisolated private static func createTapOutput<T>(
+        _ create: (UnsafeMutablePointer<T?>) -> OSStatus
+    ) -> (OSStatus, T?) {
+        var tap: T?
+        let status = create(&tap)
+        return (status, tap)
+    }
+
+    nonisolated private static func ownedTap(_ tap: MTAudioProcessingTap) -> MTAudioProcessingTap {
+        tap
+    }
+
+    nonisolated private static func ownedTap(_ tap: Unmanaged<MTAudioProcessingTap>) -> MTAudioProcessingTap {
+        tap.takeRetainedValue()
     }
 }
 
